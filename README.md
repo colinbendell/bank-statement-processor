@@ -89,7 +89,7 @@ uv run rbc-pdf-to-csv batch path/to/directory/
 - Transaction Date, Posting Date, Description, Amount
 
 **Chequing/Savings Statements:**
-- Date, Description, Withdrawals, Deposit, Balance
+- Date, Description, Withdrawals, Deposits, Balance
 
 ### Normalized CSV Format (after processing)
 
