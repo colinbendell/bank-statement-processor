@@ -33,6 +33,10 @@ Thumbs.db
 *.log
 
 
-samples/
-inputs/
+samples/**/*.pdf
+samples/**/*.csv
+inputs/**/*.pdf
+inputs/**/*.csv
 .claude/*local.json
+.env
+.build

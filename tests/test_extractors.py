@@ -1,9 +1,7 @@
 """Tests for PDF extractors using sample files."""
 
-import csv
-from io import StringIO
 from pathlib import Path
-
+import pandas as pd
 import pytest
 
 from rbc2.extractors import detect_statement_type, extract_to_csv
@@ -16,17 +14,13 @@ PDF_FILES = list(SAMPLES_DIR.glob("*.pdf"))
 @pytest.mark.parametrize("pdf_path", PDF_FILES, ids=[p.stem for p in PDF_FILES])
 def test_pdf_extraction(pdf_path):
     """Test that PDF extraction completes without errors."""
-    expected_output_path = pdf_path.with_suffix(".csv")
-    with open(expected_output_path, "r") as f:
-        expected_output = f.read()
+    expected_output_path = pdf_path.with_suffix(".extracted.csv")
+    expected_df = pd.read_csv(expected_output_path)
     # Extract PDF to CSV
-    actual_output = extract_to_csv(pdf_path)
+    actual_df = extract_to_csv(pdf_path)
 
-    expected_csv = csv.DictReader(StringIO(expected_output))
-    actual_csv = csv.DictReader(StringIO(actual_output))
-
-    assert expected_csv.fieldnames == actual_csv.fieldnames
-    for expected_row, actual_row in zip(expected_csv, actual_csv):
+    assert set(expected_df.columns) == set(actual_df.columns)
+    for expected_row, actual_row in zip(expected_df, actual_df):
         assert expected_row == actual_row
 
 
@@ -53,21 +47,12 @@ def test_visa_extraction_format():
     if not visa_pdf:
         pytest.skip("No visa PDF found in samples")
 
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
-        output_path = Path(f.name)
-
-    try:
-        reader = csv.DictReader(StringIO(extract_to_csv(visa_pdf)))
-        # Check the format
-        fieldnames = reader.fieldnames
-        assert "Transaction Date" in fieldnames
-        assert "Posting Date" in fieldnames
-        assert "Description" in fieldnames
-        assert "Amount" in fieldnames
-    finally:
-        output_path.unlink(missing_ok=True)
+    df = extract_to_csv(visa_pdf)
+    # Check the format
+    assert "Transaction Date" in df.columns
+    assert "Posting Date" in df.columns
+    assert "Description" in df.columns
+    assert "Amount" in df.columns
 
 
 def test_chequing_extraction_format():
@@ -77,16 +62,11 @@ def test_chequing_extraction_format():
     if not chequing_pdf:
         pytest.skip("No chequing/savings PDF found in samples")
 
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
-        output_path = Path(f.name)
-
-    csv_content = extract_to_csv(chequing_pdf)
+    df = extract_to_csv(chequing_pdf)
 
     # Check the format
-    reader = csv.DictReader(StringIO(csv_content))
-    fieldnames = reader.fieldnames
-    assert "Date" in fieldnames
-    assert "Description" in fieldnames
-    # May have Withdrawals, Deposits, Balance columns
+    assert "Date" in df.columns
+    assert "Description" in df.columns
+    assert "Withdrawals" in df.columns
+    assert "Deposits" in df.columns
+    assert "Balance" in df.columns
