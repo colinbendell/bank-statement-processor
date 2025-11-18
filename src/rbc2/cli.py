@@ -49,7 +49,7 @@ def extract(pdf_path: Path, output: Path | None, overwrite: bool):
 
 
 @main.command()
-@click.argument("file_path", type=click.Path(exists=True, path_type=Path))
+@click.argument("files", nargs=-1, type=click.Path(exists=True, path_type=Path))
 @click.option("-C", "--categories", type=click.Path(exists=True, path_type=Path), help="Add categories to the CSV file")
 @click.option(
     "--output",
@@ -58,21 +58,25 @@ def extract(pdf_path: Path, output: Path | None, overwrite: bool):
     help="Output CSV file path (default: same as input with .processed.csv extension)",
 )
 @click.option("-y", "--overwrite", is_flag=True, help="Overwrite existing CSV files")
-def process(file_path: Path, output: Path | None, categories: Path | None, overwrite: bool):
+def process(files: Path, output: Path | None, categories: Path | None, overwrite: bool):
     """Normalize a CSV file to standard format."""
     # check if the pdf_path is a directory
-    files = [file_path]
-    if file_path.is_dir():
-        pdf_files = list(file_path.glob("*.pdf"))
-        files = list(file_path.glob("*.csv"))
+    dir_paths = [file_path for file_path in files if file_path.is_dir()]
+    for dir_path in dir_paths:
+        pdf_files = list(dir_path.glob("*.pdf"))
+        csv_files = list(dir_path.glob("*.csv"))
         files = [file for file in files if not file.with_suffix(".processed.csv")]
+        for csv_file in csv_files:
+            if not file.with_suffix(".processed.csv") and csv_file not in files:
+                files.append(csv_file)
         for pdf_file in pdf_files:
             # check if the file is in the list
+            # remove .pdf files where we have a .csv file in the array
             if pdf_file.with_suffix(".csv") not in files:
                 files.append(pdf_file)
-        # remove .pdf files where we have a .csv file in the array
-        files = sorted(files)
+    if len(files) > 1:
         output = None
+    files = sorted(files)
     for file in sorted(files):
         processed_path = file.with_suffix(".processed.csv") if output is None else output
         if processed_path.exists() and not overwrite:
