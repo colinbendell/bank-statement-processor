@@ -58,7 +58,12 @@ def extract(pdf_path: Path, output: Path | None, overwrite: bool):
     help="Output CSV file path (default: same as input with .processed.csv extension)",
 )
 @click.option("-y", "--overwrite", is_flag=True, help="Overwrite existing CSV files")
-def process(files: Path, output: Path | None, categories: Path | None, overwrite: bool):
+@click.option(
+    "--use-llm",
+    is_flag=True,
+    help="Use LLM to infer categories for uncategorized transactions (requires ANTHROPIC_API_KEY env var)",
+)
+def process(files: Path, output: Path | None, categories: Path | None, overwrite: bool, use_llm: bool):
     """Normalize a CSV file to standard format."""
     # check if the pdf_path is a directory
     dir_paths = [file_path for file_path in files if file_path.is_dir()]
@@ -67,7 +72,7 @@ def process(files: Path, output: Path | None, categories: Path | None, overwrite
         csv_files = list(dir_path.glob("*.csv"))
         files = [file for file in files if not file.with_suffix(".processed.csv")]
         for csv_file in csv_files:
-            if not file.with_suffix(".processed.csv") and csv_file not in files:
+            if not csv_file.with_suffix(".processed.csv") and csv_file not in files:
                 files.append(csv_file)
         for pdf_file in pdf_files:
             # check if the file is in the list
@@ -96,7 +101,7 @@ def process(files: Path, output: Path | None, categories: Path | None, overwrite
 
         if categories:
             initialize_category_lookup(categories)
-            categorized_csv = add_categories(normalized_csv)
+            categorized_csv = add_categories(normalized_csv, use_llm=use_llm)
             categorized_path = file.with_suffix(".categorized.csv")
             with open(categorized_path, "w") as f:
                 f.write(categorized_csv)
