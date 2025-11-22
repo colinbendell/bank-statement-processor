@@ -73,7 +73,7 @@ def sanitize_description(description: str) -> str:
     return re.sub(r"\n+", " ", description)
 
 
-def normalize_csv(input_path: Path, transactions_df: pd.DataFrame = None) -> pd.DataFrame:
+def normalize_csv(transactions_df: pd.DataFrame) -> pd.DataFrame:
     """
     Normalize a CSV file to a standard format.
 
@@ -91,15 +91,9 @@ def normalize_csv(input_path: Path, transactions_df: pd.DataFrame = None) -> pd.
         Normalized CSV content as string
     """
     df = transactions_df
-    if df is None:
-        df = pd.read_csv(input_path)
 
     if df.empty:
         return df
-
-    # Determine the source PDF filename
-    if "File" not in df.columns:
-        df["File"] = input_path.with_suffix(".pdf").name
 
     if "Transaction Date" in df.columns:
         # clean_date_column(df, "Transaction Date")

@@ -21,7 +21,7 @@ DEFAULT_CATEGORIZER._category_lookup["uber trip toronto on | 26"] = {"Expenses /
 DEFAULT_CATEGORIZER._category_lookup["uber trip toronto on"] = {"Expenses / Travel"}
 DEFAULT_CATEGORIZER._category_lookup["investment md financial | 5000.0"] = {"Investment / MD Management"}
 DEFAULT_CATEGORIZER._category_lookup["investment md financial"] = {"Investment / MD Management"}
-print (DEFAULT_CATEGORIZER._category_lookup)
+print(DEFAULT_CATEGORIZER._category_lookup)
 
 NORMALIZE_DESCRIPTION_TESTS = [
     ("UBER* TRIP TORONTO ON", "uber trip toronto on"),
@@ -54,7 +54,7 @@ CATEGORIZE_TRANSACTION_TESTS = [
 def test_categorize_transaction(description, amount, expected):
     """Test categorize_transaction function."""
     if amount == -99.99:
-        print (DEFAULT_CATEGORIZER._category_lookup)
+        print(DEFAULT_CATEGORIZER._category_lookup)
     assert DEFAULT_CATEGORIZER.get_category(description, amount) == expected
 
 

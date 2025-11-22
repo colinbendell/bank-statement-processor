@@ -58,7 +58,115 @@ def group_spans_by_row(spans: list[dict], y_tolerance: float = 3.0) -> list[list
 class StatementExtractor:
     """Base class for statement extractors."""
 
-    def extract(self, pdf_path: Path) -> list[dict[str, Any]]:
+    ACCOUNT_NUMBER_PATTERN = re.compile(r"(?:Your\s+)?Account\s+(?:Number|No)[\s:.]+(\d[\d\s\-]+)", re.IGNORECASE)
+    CARD_NUMBER_PATTERN = re.compile(r"(\d\d\d\d\s+(?:[0-9*]{4}\s+){2}\d\d\d\d)", re.IGNORECASE)
+    CARD_ENDING_PATTERN = re.compile(r"(?:Card\s+ending|ending\s+in)[\s:]+(\d{4})", re.IGNORECASE)
+
+    SPACE_REGEX = re.compile(r"\s+")
+
+    def extract_account_numbers(self, pdf_doc: pymupdf.Document) -> list[str]:
+        """Extract account number from PDF text using multiple patterns.
+
+        Args:
+            all_text: Raw text from PDF (preserves spacing)
+
+        Returns:
+            Extracted account number or 'NOT_FOUND'
+        """
+
+        results = []
+        for page in pdf_doc:
+            page_text = page.get_text()
+            # Pattern 1: "Account Number: XXXXX" or "Your account number: XXXXX"
+            account_match = self.ACCOUNT_NUMBER_PATTERN.findall(page_text)
+            if len(account_match) > 0:
+                for card in account_match:
+                    # Clean up the account number - remove all spaces and keep dashes
+                    results.append(self.SPACE_REGEX.sub(" ", card).strip())
+                continue
+
+            # Pattern 2: Visa card numbers like "4516 07** **** 9998"
+            # Must search in all_text (not clean_text) to preserve spacing pattern
+            card_match = self.CARD_NUMBER_PATTERN.findall(page_text)
+            if len(card_match) > 0:
+                for card in card_match:
+                    if "*" in card:
+                        results.append(self.SPACE_REGEX.sub(" ", card).strip())
+                continue
+
+            # Pattern 3: Generic card ending pattern
+            card_match = self.CARD_ENDING_PATTERN.findall(page_text)
+            for card in card_match:
+                results.append(f"****{card}")
+
+        if len(results) == 0:
+            results.append("NOT_FOUND")
+        return results
+
+    PERSONAL_PATTERN = re.compile(r"\bpersonal\b", re.IGNORECASE)
+    BUSINESS_PATTERN = re.compile(r"\b(business|commercial)\b", re.IGNORECASE)
+
+    def extract_account_use(self, pdf_doc: pymupdf.Document) -> str:
+        """Determine if account is personal or business.
+
+        Args:
+            all_text: Raw text from PDF
+            pdf_path: Path to the PDF file (used as fallback)
+
+        Returns:
+            'PERSONAL', 'BUSINESS', or 'UNKNOWN'
+        """
+        # Only check the first 800 chars to avoid footer/disclaimer text
+        # (footer often contains "Royal Trust Corporation" which has "corp" in it)
+        for page in pdf_doc:
+            header = page.get_text()[:400]
+            # Check for personal first (more specific)
+            if self.PERSONAL_PATTERN.search(header):
+                return "personal"
+
+            # Then check for business indicators
+            if self.BUSINESS_PATTERN.search(header):
+                return "business"
+
+        return "personal"
+
+    def extract_account_type(self, pdf_doc: pymupdf.Document) -> str:
+        """Determine account classification (visa/chequing/savings).
+
+        Args:
+            all_text: Raw text from PDF
+
+        Returns:
+            'VISA', 'CHEQUING', 'SAVINGS', or 'UNKNOWN'
+        """
+        for page in pdf_doc:
+            page_text = page.get_text()[:400]
+
+            if match := re.search(r"(visa|master card)", page_text, re.IGNORECASE):
+                return match.group(0).lower().replace(" ", "_")
+
+            if re.search(r"credit card|cardholder agreement", page_text, re.IGNORECASE):
+                return "credit_card"
+
+            # Check for savings account
+            if re.search(r"savings?\s*account|esavings", page_text, re.IGNORECASE):
+                return "savings"
+
+            # Check for chequing - look for "chequing account" or "banking account"
+            if re.search(r"(?:chequing|banking)\s*account", page_text, re.IGNORECASE):
+                return "chequing"
+
+            # Fallback to broader patterns
+            if re.search(r"chequs|debits", page_text, re.IGNORECASE):
+                return "chequing"
+
+        return "UNKNOWN"
+
+    def statement_period(self, pdf_doc: pymupdf.Document) -> tuple[datetime, datetime]:
+        """Extract start and end years from statement period."""
+        raise NotImplementedError
+
+    def extract(self, pdf_doc: pymupdf.Document) -> pd.DataFrame:
         """Extract transactions from a PDF file."""
         raise NotImplementedError
 
@@ -66,72 +174,51 @@ class StatementExtractor:
 class VisaStatementExtractor(StatementExtractor):
     """Extractor for RBC Visa credit card statements."""
 
-    CC_DATE_PATTERN = re.compile(r"^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[-\s]*(\d{1,2})$", re.IGNORECASE)
-    STATEMENT_PERIOD_PATTERN = re.compile(
-        r"(?:STATEMENT\s+)?FROM\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2}),?\s*(\d{4})?\s+TO\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2}),?\s*(\d{4})",
+    TRANSACTION_DATE_REGEX = re.compile(
+        r"^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[-\s]*(\d{1,2})$", re.IGNORECASE
+    )
+    STATEMENT_PERIOD_REGEX = re.compile(
+        r"(?:STATEMENT\s+)?(?:From\s+)(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2}),?\s*(\d{4})?\s+TO\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2}),?\s*(\d{4})",
         re.IGNORECASE,
     )
 
-    def _extract_statement_period(self, text: str) -> tuple[int, int]:
+    def statement_period(self, pdf_doc: pymupdf.Document) -> tuple[datetime, datetime]:
         """Extract start and end years from statement period."""
-        match = self.STATEMENT_PERIOD_PATTERN.search(text)
 
-        # if match:
-        #     s_month, s_day, s_year, e_day, e_month, e_year = match.groups()
-        #     s_month = datetime.strptime(s_month.upper(), "%b").month
-        #     e_month = datetime.strptime(e_month.upper(), "%b").month
-        #     e_year = int(e_year)
+        for page in pdf_doc:
+            text = page.get_text()
+            match = self.STATEMENT_PERIOD_REGEX.search(text)
+            if not match:
+                continue
+            start_month_str, start_day, start_year, end_month_str, end_day, end_year = match.groups()
 
-        #     if s_year:
-        #         s_year = int(s_year)
-        #     else:
-        #         s_year = e_year - 1 if s_month > e_month else e_year
-        #     return datetime(s_year, s_month, s_day), datetime(e_year, e_month, e_day)
-        if match:
-            start_month_str, start_day, start_year_str, end_month_str, end_day, end_year_str = match.groups()
-            start_month = datetime.strptime(start_month_str.upper(), "%b").month
             end_month = datetime.strptime(end_month_str.upper(), "%b").month
-            end_year = int(end_year_str)
+            end_date = datetime(int(end_year), end_month, int(end_day))
 
-            if start_year_str:
-                start_year = int(start_year_str)
-            else:
-                start_year = end_year - 1 if start_month > end_month else end_year
+            start_month = datetime.strptime(start_month_str.upper(), "%b").month
+            if not start_year:
+                start_year = end_date.year - 1 if start_month > end_date.month else end_date.year
 
-            return start_year, end_year
+            start_date = datetime(int(start_year), start_month, int(start_day))
+            return start_date, end_date
+        return None, None
 
-        # Fallback
-        match = re.search(r"\b(20\d{2})\b", text)
-        if match:
-            year = int(match.group(1))
-            return year, year
-
-        current_year = datetime.now().year
-        return current_year, current_year
-
-    def _determine_year(self, month: int, start_year: int, end_year: int) -> int:
-        """Determine which year a transaction belongs to."""
-        if start_year == end_year:
-            return start_year
-
-        # For year-crossing statements
-        return start_year if month >= 10 else end_year
-
-    def _parse_date(self, date_str: str, start_year: int, end_year: int) -> str:
+    def _parse_date(self, date_str: str, start_date: datetime, end_date: datetime) -> str:
         """Parse Visa date format and return YYYY/MM/DD."""
         date_str = date_str.replace(" ", "").upper()
 
-        match = self.CC_DATE_PATTERN.match(date_str)
+        match = self.TRANSACTION_DATE_REGEX.match(date_str)
         if not match:
             return date_str
 
         month_str, day = match.groups()
         month = datetime.strptime(month_str, "%b").month
-        year = self._determine_year(month, start_year, end_year)
+        result = datetime(start_date.year, month, int(day))
+        if result < start_date:
+            result = datetime(end_date.year, month, int(day))
+        return result.strftime("%Y-%m-%d")
 
-        return f"{year}-{month:02d}-{int(day):02d}"
-
-    def extract(self, pdf_path: Path) -> pd.DataFrame:
+    def extract(self, pdf_doc: pymupdf.Document) -> pd.DataFrame:
         """Extract transactions from a Visa statement PDF using coordinate-based parsing.
 
         Handles both single-card and multi-card statements. Multi-card statements have
@@ -139,13 +226,10 @@ class VisaStatementExtractor(StatementExtractor):
         """
         transactions = []
 
-        doc = pymupdf.open(pdf_path)
-
         # Get statement period from first page
-        first_page_text = doc[0].get_text()
-        start_year, end_year = self._extract_statement_period(first_page_text)
+        start_date, end_date = self.statement_period(pdf_doc)
 
-        for page in doc:
+        for page in pdf_doc:
             text_dict = page.get_text("dict")
 
             # Collect all text spans with coordinates
@@ -182,7 +266,7 @@ class VisaStatementExtractor(StatementExtractor):
                 row_text = " ".join([s["text"] for s in current_row])
 
                 # Check if this looks like a transaction row (has date pattern at start and amount at end)
-                has_start_date = len(current_row) > 0 and self.CC_DATE_PATTERN.match(current_row[0]["text"])
+                has_start_date = len(current_row) > 0 and self.TRANSACTION_DATE_REGEX.match(current_row[0]["text"])
                 has_end_amount = len(current_row) > 0 and re.match(r"^[-]?\$?[\d,]+\.\d{2}$", current_row[-1]["text"])
 
                 # If this is a transaction row, check next rows for continuation lines
@@ -193,7 +277,7 @@ class VisaStatementExtractor(StatementExtractor):
                         next_text = " ".join([s["text"] for s in next_row])
 
                         # Check if next row is a continuation (no date at start, no amount at end)
-                        next_has_date = len(next_row) > 0 and self.CC_DATE_PATTERN.match(next_row[0]["text"])
+                        next_has_date = len(next_row) > 0 and self.TRANSACTION_DATE_REGEX.match(next_row[0]["text"])
                         next_has_amount = len(next_row) > 0 and re.match(
                             r"^[-]?\$?[\d,]+\.\d{2}$", next_row[-1]["text"]
                         )
@@ -272,7 +356,7 @@ class VisaStatementExtractor(StatementExtractor):
 
                 # Check if first span looks like a date (MMM DD format)
                 first_text = row_spans[0]["text"]
-                if not self.CC_DATE_PATTERN.match(first_text):
+                if not self.TRANSACTION_DATE_REGEX.match(first_text):
                     continue
 
                 # Check if last span looks like an amount
@@ -310,8 +394,8 @@ class VisaStatementExtractor(StatementExtractor):
                 amount = float(amount) * -1.0
 
                 # Parse dates
-                trans_date = self._parse_date(trans_date_str, start_year, end_year)
-                post_date = self._parse_date(post_date_str, start_year, end_year)
+                trans_date = self._parse_date(trans_date_str, start_date, end_date)
+                post_date = self._parse_date(post_date_str, start_date, end_date)
 
                 # Clean amount
                 transactions.append(
@@ -323,95 +407,65 @@ class VisaStatementExtractor(StatementExtractor):
                     }
                 )
 
-        doc.close()
         return pd.DataFrame(transactions)
 
 
 class ChequingSavingsStatementExtractor(StatementExtractor):
     """Extractor for RBC Chequing and Savings account statements."""
 
-    STATEMENT_PERIOD_PATTERN = re.compile(
-        r"From\s+([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})\s+to\s+([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})", re.IGNORECASE
+    STATEMENT_PERIOD_REGEX = re.compile(
+        r"(?:From\s+)?([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})\s+to\s+([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})", re.IGNORECASE
     )
-    ALT_STATEMENT_PERIOD_PATTERN = re.compile(
-        r"([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})\s+to\s+([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})", re.IGNORECASE
-    )
+    TRANSACTION_DATE_REGEX = re.compile(r"(\d{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)", re.IGNORECASE)
 
-    def _extract_statement_period(self, text: str) -> tuple[int, int, int, int]:
-        """
-        Extract start and end dates from statement period.
+    def statement_period(self, pdf_doc: pymupdf.Document) -> tuple[datetime, datetime]:
+        """Extract start and end years from statement period."""
 
-        Returns:
-            (start_year, end_year, start_month, end_month)
-        """
-        # Try with "From" prefix first
-        match = self.STATEMENT_PERIOD_PATTERN.search(text)
+        for page in pdf_doc:
+            text = page.get_text()
+            match = self.STATEMENT_PERIOD_REGEX.search(text)
+            if not match:
+                continue
+            start_month_str, start_day, start_year, end_month_str, end_day, end_year = match.groups()
 
-        # If not found, try without "From" prefix (e.g., "December 30, 2022 to January 31, 2023")
-        if not match:
-            match = self.ALT_STATEMENT_PERIOD_PATTERN.search(text)
+            end_month = datetime.strptime(end_month_str.upper(), "%B").month
+            end_date = datetime(int(end_year), end_month, int(end_day))
 
-        if match:
-            start_month_str, start_year_str, end_month_str, end_year_str = match.groups()
-            start_month = datetime.strptime(start_month_str.title(), "%B").month
-            end_month = datetime.strptime(end_month_str.title(), "%B").month
-            return int(start_year_str), int(end_year_str), start_month, end_month
+            start_month = datetime.strptime(start_month_str.upper(), "%B").month
+            if not start_year:
+                start_year = end_date.year - 1 if start_month > end_date.month else end_date.year
 
-        # Fallback
-        match = re.search(r"\b(20\d{2})\b", text)
-        if match:
-            year = int(match.group(1))
-            return year, year, 1, 12
+            start_date = datetime(int(start_year), start_month, int(start_day))
+            return start_date, end_date
+        return None, None
 
-        current_year = datetime.now().year
-        return current_year, current_year, 1, 12
+    def _parse_date(self, date_str: str, start_date: datetime, end_date: datetime) -> str:
+        """Parse Visa date format and return YYYY/MM/DD."""
 
-    def _determine_year(self, month: int, start_year: int, end_year: int, start_month: int, end_month: int) -> int:
-        """Determine which year a transaction month belongs to."""
-        if start_year == end_year:
-            return start_year
-
-        # For year-crossing statements
-        if start_month > end_month:
-            if month >= start_month:
-                return start_year
-            elif month <= end_month:
-                return end_year
-            else:
-                return end_year
-        else:
-            return start_year
-
-    def _parse_date(self, date_str: str, start_year: int, end_year: int, start_month: int, end_month: int) -> str:
-        """Parse chequing/savings date format and return YYYY/MM/DD."""
-        date_str = date_str.replace(" ", "")
-
-        match = re.match(r"(\d{1,2})([A-Za-z]{3})", date_str)
+        match = self.TRANSACTION_DATE_REGEX.match(date_str)
         if not match:
             return date_str
 
         day, month_str = match.groups()
-        month = datetime.strptime(month_str.title(), "%b").month
-        year = self._determine_year(month, start_year, end_year, start_month, end_month)
+        month = datetime.strptime(month_str, "%b").month
+        result = datetime(start_date.year, month, int(day))
+        if result < start_date:
+            result = datetime(end_date.year, month, int(day))
+        return result.strftime("%Y-%m-%d")
 
-        return f"{year}-{month:02d}-{int(day):02d}"
-
-    def extract(self, pdf_path: Path) -> pd.DataFrame:
+    def extract(self, pdf_doc: pymupdf.Document) -> pd.DataFrame:
         """Extract transactions from a Chequing/Savings statement PDF using coordinate-based parsing."""
         transactions = []
 
-        doc = pymupdf.open(pdf_path)
-
         # Get statement period from first page
-        first_page_text = doc[0].get_text()
-        start_year, end_year, start_month, end_month = self._extract_statement_period(first_page_text)
+        start_date, end_date = self.statement_period(pdf_doc)
 
         # Detect column positions from header row (first page)
         withdrawal_col_x = None
         deposit_col_x = None
         balance_col_x = None
 
-        first_page_dict = doc[0].get_text("dict")
+        first_page_dict = pdf_doc[0].get_text("dict")
         for block in first_page_dict.get("blocks", []):
             if block.get("type") == 0:
                 for line in block.get("lines", []):
@@ -438,7 +492,7 @@ class ChequingSavingsStatementExtractor(StatementExtractor):
         # Track last seen date
         last_date = None
 
-        for page in doc:
+        for page in pdf_doc:
             text_dict = page.get_text("dict")
 
             # Collect all spans with coordinates
@@ -543,7 +597,7 @@ class ChequingSavingsStatementExtractor(StatementExtractor):
                         break
 
                 if date_span:
-                    parsed_date = self._parse_date(date_span["text"], start_year, end_year, start_month, end_month)
+                    parsed_date = self._parse_date(date_span["text"], start_date, end_date)
                     last_date = parsed_date
                 else:
                     if not last_date:
@@ -653,7 +707,6 @@ class ChequingSavingsStatementExtractor(StatementExtractor):
                     }
                 )
 
-        doc.close()
         return pd.DataFrame(transactions)
 
 
@@ -697,14 +750,34 @@ def extract_to_csv(pdf_path: Path) -> pd.DataFrame:
     Returns:
         CSV content as a string
     """
-    statement_type = detect_statement_type(pdf_path)
+    with pymupdf.open(pdf_path) as pdf:
+        all_text = []
+        for pdf_page in pdf:
+            all_text.append(" ".join(pdf_page.get_text().split()))
 
-    if statement_type == "visa":
-        extractor = VisaStatementExtractor()
-    else:
-        extractor = ChequingSavingsStatementExtractor()
-    df = extractor.extract(pdf_path)
-    if df.empty:
-        return df
+        # account_use = _extract_account_use(all_text)
+        # account_type = _extract_account_type(all_text)
+        # account_numbers = _extract_account_number(all_text)
+        # statement_end_date = _extract_statement_end_date(all_text)
+
+        statement_type = detect_statement_type(pdf_path)
+        # file = "personal/rbc/visa/141232/2025-08-20.pdf"
+
+        if statement_type == "visa":
+            extractor = VisaStatementExtractor()
+        else:
+            extractor = ChequingSavingsStatementExtractor()
+        df = extractor.extract(pdf)
+        if df.empty:
+            return df
+
+        account_use = extractor.extract_account_use(pdf)
+        account_type = extractor.extract_account_type(pdf)
+        account_numbers = list(extractor.extract_account_numbers(pdf))
+        # TODO: make this based on frequency
+        account_number = account_numbers[-1]
+        start_date, end_date = extractor.statement_period(pdf)
+
+        df["File"] = f"{account_use}_{account_type}_{account_number.replace(' ', '-')}_{end_date.strftime('%Y_%m_%d')}"
 
     return df

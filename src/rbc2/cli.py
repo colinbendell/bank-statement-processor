@@ -85,7 +85,7 @@ def convert(
             click.echo(f"❌ {file} - No transactions found")
             continue
 
-        output_df = normalize_csv(file, output_df)
+        output_df = normalize_csv(output_df)
 
         if artifacts:
             with open(output_path.with_suffix(".processed.csv"), "w") as f:

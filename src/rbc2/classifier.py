@@ -17,11 +17,13 @@ from typing import List
 # Load environment variables from .env file
 load_dotenv()
 
+
 @dataclass
 class Cluster:
     category: str = ""
     members: List[str] = field(default_factory=list)
-    rep: str = ""              # representative string used for matching
+    rep: str = ""  # representative string used for matching
+
 
 class Classifier:
     """Transaction categorizer that maps descriptions to categories using a lookup dictionary."""
@@ -79,7 +81,6 @@ class Classifier:
         self._category_clusters.append(new_cluster)
         return new_cluster
 
-
     def set_category(self, description: str, amount: float, category: str) -> None:
         """Add a category to the lookup dictionary.
 
@@ -119,7 +120,7 @@ class Classifier:
 
         cluster = self.set_category_cluster(f"{description}", threshold=80)
         if cluster is not None and cluster.category is not None:
-            print (f"**: {description} {amount} {cluster.category}")
+            print(f"**: {description} {amount} {cluster.category}")
             return cluster.category + "**"
 
         return None
