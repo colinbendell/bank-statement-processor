@@ -9,11 +9,19 @@ from io import StringIO
 import pandas as pd
 from anthropic import Anthropic
 from dotenv import load_dotenv
+from rapidfuzz import process, fuzz
+from dataclasses import dataclass, field
+from typing import List
 
 
 # Load environment variables from .env file
 load_dotenv()
 
+@dataclass
+class Cluster:
+    category: str = ""
+    members: List[str] = field(default_factory=list)
+    rep: str = ""              # representative string used for matching
 
 class Classifier:
     """Transaction categorizer that maps descriptions to categories using a lookup dictionary."""
@@ -24,35 +32,53 @@ class Classifier:
         Args:
             categories_csv_path: Path to the categories.csv file
         """
+        self._category_clusters: list[Cluster] = []
         self._category_lookup: dict[str, str] = {}
+
         if categories_csv_path is not None and categories_csv_path.exists():
             with open(categories_csv_path, "r", encoding="utf-8") as f:
                 csv_content = f.read()
             self._initialize_category_lookup(StringIO(csv_content))
 
-    SIMPLE_ID_PATTERN = re.compile(r"\*[0-9]*(?:[A-Z]+[0-9]+){2,}[A-Z0-9]+\b")
-    LONGER_ID_PATTERN = re.compile(r"\b[0-9]*[A-Z]+[0-9]+[A-Z0-9]+$")
-    NON_ALPHA_PATTERN = re.compile(r"[^a-z]", re.IGNORECASE)
+    SIMPLE_ID_PATTERN = re.compile(r"[-\*]\s*[0-9]*(?:[A-Z]+[0-9]+){2,}[A-Z0-9]+\b")
+    LONGER_ID_PATTERN = re.compile(r"\b[0-9]*[A-Z]+[0-9]+[A-Z0-9]+$|\s*[0-9]+$")
+    NON_ALPHA_PATTERN = re.compile(r"[^a-z]+", re.IGNORECASE)
+    NON_ALPHA_NUM_PATTERN = re.compile(r"[^a-z0-9]+", re.IGNORECASE)
 
     @staticmethod
-    def _get_category_keys(description: str, amount: float) -> list[str]:
-        """Normalize a transaction description by removing non-alpha characters and converting to lowercase.
+    def normalize_description(description: str) -> str:
+        norm = Classifier.SIMPLE_ID_PATTERN.sub("", description)
+        norm = Classifier.LONGER_ID_PATTERN.sub("", norm)
+        norm = Classifier.NON_ALPHA_PATTERN.sub(" ", norm.lower()).strip()
+        return norm
 
-        Args:
-            description: Raw transaction description
-            amount: Transaction amount
+    def set_category_cluster(self, description: str, category: str = None, threshold: int = 90) -> Cluster:
+        norm_desc = Classifier.NON_ALPHA_NUM_PATTERN.sub(" ", description.lower()).strip()
 
-        Returns:
-            List of normalized keys (with and without amount)
-        """
-        # Remove non-alpha characters (keeping spaces temporarily)
-        normalized_description = Classifier.SIMPLE_ID_PATTERN.sub("", description)
-        normalized_description = Classifier.LONGER_ID_PATTERN.sub("", normalized_description)
-        normalized_description = Classifier.NON_ALPHA_PATTERN.sub("", normalized_description).lower()
-        int_amount = int(abs(amount))
-        key_with_amount = f"{normalized_description}|{int_amount}"
-        key_without_amount = normalized_description
-        return [key_with_amount, key_without_amount]
+        best_cluster = None
+        best_score = -1
+
+        for cluster in self._category_clusters:
+            score = fuzz.WRatio(norm_desc, cluster.rep)
+            if score > best_score:
+                if category == None or cluster.category == category:
+                    best_score = score
+                    best_cluster = cluster
+
+        if best_cluster is not None and best_score >= threshold:
+            best_cluster.members.append(norm_desc)
+            # optional: update representative if desired
+            return best_cluster
+
+        # No good match → create a new cluster
+        new_cluster = Cluster(
+            category=category,
+            members=[norm_desc],
+            rep=norm_desc,
+        )
+        self._category_clusters.append(new_cluster)
+        return new_cluster
+
 
     def set_category(self, description: str, amount: float, category: str) -> None:
         """Add a category to the lookup dictionary.
@@ -62,13 +88,15 @@ class Classifier:
             amount: Transaction amount
             category: Category string
         """
-        category_keys = self._get_category_keys(description, amount)
+        norm_desc = Classifier.normalize_description(description)
+        category_set = self._category_lookup.setdefault(norm_desc, set())
+        category_set.add(category)
 
-        for key in category_keys:
-            category_set = self._category_lookup.get(key, set())
+        norm_amount = int(abs(amount))
+        category_set = self._category_lookup.setdefault(f"{norm_desc} | {norm_amount}", set())
+        category_set.add(category)
 
-            category_set.add(category)
-            self._category_lookup[key] = category_set
+        self.set_category_cluster(f"{description} {norm_amount}", category, threshold=90)
 
     def get_category(self, description: str, amount: float) -> str | None:
         """Get the category for a given description and amount.
@@ -80,11 +108,20 @@ class Classifier:
         Returns:
             Category string if found, None otherwise
         """
-        category_keys = self._get_category_keys(description, amount)
-        for key in category_keys:
-            category_set = self._category_lookup.get(key, set())
-            if len(category_set) == 1:
-                return list(category_set)[0]
+        norm_desc = Classifier.normalize_description(description)
+        norm_amount = int(abs(amount))
+        category_set = self._category_lookup.get(f"{norm_desc} | {norm_amount}", set())
+        if len(category_set) == 1:
+            return list(category_set)[0]
+        category_set = self._category_lookup.get(norm_desc, set())
+        if len(category_set) == 1:
+            return list(category_set)[0]
+
+        cluster = self.set_category_cluster(f"{description}", threshold=80)
+        if cluster is not None and cluster.category is not None:
+            print (f"**: {description} {amount} {cluster.category}")
+            return cluster.category + "**"
+
         return None
 
     def _initialize_category_lookup(self, csv_content: StringIO) -> None:
@@ -211,13 +248,7 @@ Response:"""
         Returns:
             Category string if found, None otherwise
         """
-        category_keys = self._get_category_keys(description, amount)
-
-        for key in category_keys:
-            if key in self._category_lookup:
-                return self._category_lookup[key]
-
-        return None
+        return self.get_category(description, amount)
 
     def categorize_transactions(
         self,
@@ -233,6 +264,9 @@ Response:"""
         Returns:
             CSV content string with Category column added
         """
+
+        if transactions_df.empty:
+            return transactions_df
 
         # First pass: categorize using existing lookup
         transactions_df["Category"] = transactions_df.apply(
