@@ -54,11 +54,26 @@ class Classifier:
         norm = Classifier.NON_ALPHA_PATTERN.sub(" ", norm.lower()).strip()
         return norm
 
+    def get_category_cluster(self, description: str, threshold: int = 90) -> Cluster | None:
+        norm_desc = Classifier.NON_ALPHA_NUM_PATTERN.sub(" ", description.lower()).strip()
+
+        best_cluster = None
+        best_score = threshold -1
+
+        for cluster in self._category_clusters:
+            score = fuzz.WRatio(norm_desc, cluster.rep)
+            if score > best_score:
+                best_score = score
+                best_cluster = cluster
+
+        return best_cluster
+
+
     def set_category_cluster(self, description: str, category: str = None, threshold: int = 90) -> Cluster:
         norm_desc = Classifier.NON_ALPHA_NUM_PATTERN.sub(" ", description.lower()).strip()
 
         best_cluster = None
-        best_score = -1
+        best_score = threshold -1
 
         for cluster in self._category_clusters:
             score = fuzz.WRatio(norm_desc, cluster.rep)
@@ -118,9 +133,9 @@ class Classifier:
         if len(category_set) == 1:
             return list(category_set)[0]
 
-        cluster = self.set_category_cluster(f"{description}", threshold=80)
+        cluster = self.get_category_cluster(f"{description}", threshold=80)
         if cluster is not None and cluster.category is not None:
-            print(f"**: {description} {amount} {cluster.category}")
+            # print(f"**: {description} {amount} {cluster.category}")
             return cluster.category + "**"
 
         return None
@@ -279,7 +294,7 @@ Response:"""
         for idx, row in transactions_df.iterrows():
             if pd.isna(row["Category"]) or row["Category"] is None:
                 uncategorized_rows.append((idx, row["Description"], row["Amount"]))
-                print(f"??: {row['Description']} {row['Amount']}")
+                # print(f"??: {row['Description']} {row['Amount']}")
 
         # Batch process with LLM if there are uncategorized transactions
         if uncategorized_rows:
