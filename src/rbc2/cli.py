@@ -6,7 +6,8 @@ import click
 
 from . import __version__
 from .extractors import extract_to_csv
-from .processors import normalize_csv, process_pdf_to_normalized_csv
+from .processors import normalize_csv
+from .categorizer import add_categories, initialize_category_lookup
 
 
 @click.group()
@@ -49,6 +50,7 @@ def extract(pdf_path: Path, output: Path | None, overwrite: bool):
 
 @main.command()
 @click.argument("file_path", type=click.Path(exists=True, path_type=Path))
+@click.option("-C", "--categories", type=click.Path(exists=True, path_type=Path), help="Add categories to the CSV file")
 @click.option(
     "--output",
     "-o",
@@ -56,7 +58,7 @@ def extract(pdf_path: Path, output: Path | None, overwrite: bool):
     help="Output CSV file path (default: same as input with .processed.csv extension)",
 )
 @click.option("-y", "--overwrite", is_flag=True, help="Overwrite existing CSV files")
-def process(file_path: Path, output: Path | None, overwrite: bool):
+def process(file_path: Path, output: Path | None, categories: Path | None, overwrite: bool):
     """Normalize a CSV file to standard format."""
     # check if the pdf_path is a directory
     files = [file_path]
@@ -72,9 +74,9 @@ def process(file_path: Path, output: Path | None, overwrite: bool):
         files = sorted(files)
         output = None
     for file in sorted(files):
-        output_path = file.with_suffix(".processed.csv") if output is None else output
-        if output_path.exists() and not overwrite:
-            click.echo(f"☑️ SKIPPED: {output_path}")
+        processed_path = file.with_suffix(".processed.csv") if output is None else output
+        if processed_path.exists() and not overwrite:
+            click.echo(f"☑️ SKIPPED: {processed_path}")
             continue
 
         # check if we need to convert the file to csv first
@@ -85,77 +87,16 @@ def process(file_path: Path, output: Path | None, overwrite: bool):
 
         normalized_csv = normalize_csv(file, csv_content)
 
-        with open(output_path, "w") as f:
+        with open(processed_path, "w") as f:
             f.write(normalized_csv)
-        click.echo(f"✅ {output_path}")
 
-
-@main.command()
-@click.argument("pdf_path", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(path_type=Path),
-    help="Output CSV file path (default: same as input with .processed.csv extension)",
-)
-@click.option("--keep-intermediate/--no-keep-intermediate", default=False, help="Keep the intermediate CSV file")
-def convert(pdf_path: Path, output: Path | None, keep_intermediate: bool):
-    """
-    Convert PDF to normalized CSV in one step.
-
-    This command extracts the PDF to CSV and then normalizes it.
-    """
-    try:
-        output_path = process_pdf_to_normalized_csv(pdf_path, output)
-        click.echo(f"Converted and normalized PDF to: {output_path}")
-
-        # Clean up intermediate CSV if requested
-        if not keep_intermediate:
-            temp_csv = pdf_path.with_suffix(".csv")
-            if temp_csv.exists() and temp_csv != output_path:
-                temp_csv.unlink()
-
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        raise click.Abort() from e
-
-
-@main.command()
-@click.argument("directory", type=click.Path(exists=True, path_type=Path))
-@click.option("--pattern", default="*.pdf", help="File pattern to match (default: *.pdf)")
-@click.option("--keep-intermediate/--no-keep-intermediate", default=False, help="Keep the intermediate CSV files")
-def batch(directory: Path, pattern: str, keep_intermediate: bool):
-    """
-    Convert all PDFs in a directory to normalized CSV files.
-    """
-    pdf_files = list(Path(directory).glob(pattern))
-
-    if not pdf_files:
-        click.echo(f"No files matching '{pattern}' found in {directory}")
-        return
-
-    click.echo(f"Found {len(pdf_files)} PDF files to process")
-
-    success_count = 0
-    error_count = 0
-
-    for pdf_path in pdf_files:
-        try:
-            output_path = process_pdf_to_normalized_csv(pdf_path)
-            click.echo(f"✓ {pdf_path.name} -> {output_path.name}")
-
-            # Clean up intermediate CSV if requested
-            if not keep_intermediate:
-                temp_csv = pdf_path.with_suffix(".csv")
-                if temp_csv.exists() and temp_csv != output_path:
-                    temp_csv.unlink()
-
-            success_count += 1
-        except Exception as e:
-            click.echo(f"✗ {pdf_path.name}: {e}", err=True)
-            error_count += 1
-
-    click.echo(f"\nProcessed {success_count} files successfully, {error_count} errors")
+        if categories:
+            initialize_category_lookup(categories)
+            categorized_csv = add_categories(normalized_csv)
+            categorized_path = file.with_suffix(".categorized.csv")
+            with open(categorized_path, "w") as f:
+                f.write(categorized_csv)
+        click.echo(f"✅ {processed_path}")
 
 
 if __name__ == "__main__":

@@ -232,22 +232,21 @@ class VisaStatementExtractor(StatementExtractor):
 
                 description = " ".join(description_parts)
 
-                amount = last_text
+                amount = re.sub(r"[^0-9.-]", "", last_text)
+                # amounts are negative for visa statements
+                amount = float(amount) * -1.0
 
                 # Parse dates
                 trans_date = self._parse_date(trans_date_str, start_year, end_year)
                 post_date = self._parse_date(post_date_str, start_year, end_year)
 
                 # Clean amount
-                is_negative = amount.startswith("-")
-                amount_clean = amount.replace("-", "").replace("$", "").replace(",", "")
-
                 transactions.append(
                     {
                         "Transaction Date": trans_date,
                         "Posting Date": post_date,
                         "Description": description,
-                        "Amount": f"-{amount_clean}" if is_negative else amount_clean,
+                        "Amount": amount,
                     }
                 )
 
