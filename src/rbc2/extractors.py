@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pymupdf  # PyMuPDF
+import pandas as pd
 
 
 def group_spans_by_row(spans: list[dict], y_tolerance: float = 3.0) -> list[list[dict]]:
@@ -65,10 +66,15 @@ class StatementExtractor:
 class VisaStatementExtractor(StatementExtractor):
     """Extractor for RBC Visa credit card statements."""
 
+    CC_DATE_PATTERN = re.compile(r"^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[-\s]*(\d{1,2})$", re.IGNORECASE)
+    STATEMENT_PERIOD_PATTERN = re.compile(
+        r"(?:STATEMENT\s+)?FROM\s+([A-Z]{3})\s+\d{1,2},?\s*(\d{4})?\s+TO\s+([A-Z]{3})\s+\d{1,2},?\s*(\d{4})",
+        re.IGNORECASE,
+    )
+
     def _extract_statement_period(self, text: str) -> tuple[int, int]:
         """Extract start and end years from statement period."""
-        pattern = r"(?:STATEMENT\s+)?FROM\s+([A-Z]{3})\s+\d{1,2},?\s*(\d{4})?\s+TO\s+([A-Z]{3})\s+\d{1,2},?\s*(\d{4})"
-        match = re.search(pattern, text, re.IGNORECASE)
+        match = self.STATEMENT_PERIOD_PATTERN.search(text)
 
         if match:
             start_month_str, start_year_str, end_month_str, end_year_str = match.groups()
@@ -104,7 +110,7 @@ class VisaStatementExtractor(StatementExtractor):
         """Parse Visa date format and return YYYY/MM/DD."""
         date_str = date_str.replace(" ", "").upper()
 
-        match = re.match(r"([A-Z]{3})(\d{1,2})", date_str)
+        match = self.CC_DATE_PATTERN.match(date_str)
         if not match:
             return date_str
 
@@ -114,7 +120,7 @@ class VisaStatementExtractor(StatementExtractor):
 
         return f"{year}-{month:02d}-{int(day):02d}"
 
-    def extract(self, pdf_path: Path) -> list[dict[str, Any]]:
+    def extract(self, pdf_path: Path) -> pd.DataFrame:
         """Extract transactions from a Visa statement PDF using coordinate-based parsing.
 
         Handles both single-card and multi-card statements. Multi-card statements have
@@ -156,6 +162,60 @@ class VisaStatementExtractor(StatementExtractor):
             # Group into rows
             rows = group_spans_by_row(all_spans, y_tolerance=3.0)
 
+            # Merge multi-line descriptions for Visa statements
+            # When a description line continues on the next line without dates/amounts
+            merged_rows = []
+            i = 0
+            while i < len(rows):
+                current_row = rows[i]
+                row_text = " ".join([s["text"] for s in current_row])
+
+                # Check if this looks like a transaction row (has date pattern at start and amount at end)
+                has_start_date = len(current_row) > 0 and self.CC_DATE_PATTERN.match(current_row[0]["text"])
+                has_end_amount = len(current_row) > 0 and re.match(r"^[-]?\$?[\d,]+\.\d{2}$", current_row[-1]["text"])
+
+                # If this is a transaction row, check next rows for continuation lines
+                if has_start_date and has_end_amount:
+                    # Look ahead for description continuation lines
+                    while i + 1 < len(rows):
+                        next_row = rows[i + 1]
+                        next_text = " ".join([s["text"] for s in next_row])
+
+                        # Check if next row is a continuation (no date at start, no amount at end)
+                        next_has_date = len(next_row) > 0 and self.CC_DATE_PATTERN.match(next_row[0]["text"])
+                        next_has_amount = len(next_row) > 0 and re.match(
+                            r"^[-]?\$?[\d,]+\.\d{2}$", next_row[-1]["text"]
+                        )
+
+                        # Stop if next row looks like a new transaction or header
+                        if next_has_date or next_has_amount:
+                            break
+                        if "TRANSACTION" in next_text.upper() or "POSTING" in next_text.upper():
+                            break
+
+                        # Skip pure numeric reference codes (authorization numbers, etc.)
+                        # These appear on their own line but are not part of the description
+                        if re.match(r"^\d+$", next_text.strip()):
+                            i += 1
+                            continue
+
+                        # Check y-distance - don't merge if too far apart (different sections)
+                        if len(current_row) > 0 and len(next_row) > 0:
+                            y_distance = abs(next_row[0]["y"] - current_row[-1]["y"])
+                            if y_distance > 15.0:
+                                break
+
+                        # This is a continuation line - insert it before the amount
+                        # Remove amount from current row, add continuation text, re-add amount
+                        amount_span = current_row[-1]
+                        current_row = current_row[:-1] + next_row + [amount_span]
+                        i += 1
+
+                merged_rows.append(current_row)
+                i += 1
+
+            rows = merged_rows
+
             for row_spans in rows:
                 # Build row text first for various checks
                 row_text = " ".join([s["text"] for s in row_spans])
@@ -165,7 +225,9 @@ class VisaStatementExtractor(StatementExtractor):
                 # These rows have only 2 spans and should be captured before skipping short rows
                 # Currency info appears AFTER the transaction, so we need to append it to the last transaction
                 currency_match = re.search(
-                    r"Foreign\s+Currency\s*-\s*([A-Z]{3})\s+([\d,]+\.\d{2})\s+Exchange\s+rate\s*-\s*([\d.]+)", row_text
+                    r"Foreign\s+Currency\s*-\s*([A-Z]{3})\s+([\d,]+\.\d{2})\s+Exchange\s+rate\s*-\s*([\d.]+)",
+                    row_text,
+                    re.IGNORECASE,
                 )
                 if currency_match:
                     currency_code = currency_match.group(1)
@@ -199,7 +261,7 @@ class VisaStatementExtractor(StatementExtractor):
 
                 # Check if first span looks like a date (MMM DD format)
                 first_text = row_spans[0]["text"]
-                if not re.match(r"^[A-Z]{3}\s*\d{1,2}$", first_text.upper()):
+                if not self.CC_DATE_PATTERN.match(first_text):
                     continue
 
                 # Check if last span looks like an amount
@@ -243,19 +305,26 @@ class VisaStatementExtractor(StatementExtractor):
                 # Clean amount
                 transactions.append(
                     {
-                        "Transaction Date": trans_date,
-                        "Posting Date": post_date,
+                        "Transaction Date": pd.to_datetime(trans_date),
+                        "Posting Date": pd.to_datetime(post_date),
                         "Description": description,
-                        "Amount": amount,
+                        "Amount": pd.to_numeric(amount),
                     }
                 )
 
         doc.close()
-        return transactions
+        return pd.DataFrame(transactions)
 
 
 class ChequingSavingsStatementExtractor(StatementExtractor):
     """Extractor for RBC Chequing and Savings account statements."""
+
+    STATEMENT_PERIOD_PATTERN = re.compile(
+        r"From\s+([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})\s+to\s+([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})", re.IGNORECASE
+    )
+    ALT_STATEMENT_PERIOD_PATTERN = re.compile(
+        r"([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})\s+to\s+([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})", re.IGNORECASE
+    )
 
     def _extract_statement_period(self, text: str) -> tuple[int, int, int, int]:
         """
@@ -265,13 +334,11 @@ class ChequingSavingsStatementExtractor(StatementExtractor):
             (start_year, end_year, start_month, end_month)
         """
         # Try with "From" prefix first
-        pattern = r"From\s+([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})\s+to\s+([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})"
-        match = re.search(pattern, text, re.IGNORECASE)
+        match = self.STATEMENT_PERIOD_PATTERN.search(text)
 
         # If not found, try without "From" prefix (e.g., "December 30, 2022 to January 31, 2023")
         if not match:
-            pattern = r"([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})\s+to\s+([A-Za-z]+)\s+\d{1,2},?\s+(\d{4})"
-            match = re.search(pattern, text, re.IGNORECASE)
+            match = self.ALT_STATEMENT_PERIOD_PATTERN.search(text)
 
         if match:
             start_month_str, start_year_str, end_month_str, end_year_str = match.groups()
@@ -318,7 +385,7 @@ class ChequingSavingsStatementExtractor(StatementExtractor):
 
         return f"{year}-{month:02d}-{int(day):02d}"
 
-    def extract(self, pdf_path: Path) -> list[dict[str, Any]]:
+    def extract(self, pdf_path: Path) -> pd.DataFrame:
         """Extract transactions from a Chequing/Savings statement PDF using coordinate-based parsing."""
         transactions = []
 
@@ -371,7 +438,9 @@ class ChequingSavingsStatementExtractor(StatementExtractor):
                         for span in line.get("spans", []):
                             text = span.get("text", "").strip()
                             bbox = span.get("bbox", [])
-                            if text and bbox:
+                            # Filter out document reference codes (typically start with RBPDA, RBPDP, etc.)
+                            # These appear in margins and should not be included in transactions
+                            if text and bbox and not re.match(r"^RBP[A-Z]{2}\d", text):
                                 all_spans.append(
                                     {
                                         "text": text,
@@ -413,6 +482,13 @@ class ChequingSavingsStatementExtractor(StatementExtractor):
                     "of 1",
                     "of 2",
                     "of 3",
+                    "of 4",
+                    "of 5",
+                    "of 6",
+                    "of 7",
+                    "of 8",
+                    "of 9",
+                    "of 10",
                     "account statement",
                     "account number",
                     "continued",
@@ -481,6 +557,13 @@ class ChequingSavingsStatementExtractor(StatementExtractor):
                     "of 1",
                     "of 2",
                     "of 3",
+                    "of 4",
+                    "of 5",
+                    "of 6",
+                    "of 7",
+                    "of 8",
+                    "of 9",
+                    "of 10",
                     "account statement",
                     "account number",
                     "continued",
@@ -551,16 +634,16 @@ class ChequingSavingsStatementExtractor(StatementExtractor):
 
                 transactions.append(
                     {
-                        "Date": parsed_date,
+                        "Date": pd.to_datetime(parsed_date),
                         "Description": description,
-                        "Withdrawals": withdrawal_amount,
-                        "Deposits": deposit_amount,
-                        "Balance": balance_amount,
+                        "Withdrawals": pd.to_numeric(withdrawal_amount),
+                        "Deposits": pd.to_numeric(deposit_amount),
+                        "Balance": pd.to_numeric(balance_amount),
                     }
                 )
 
         doc.close()
-        return transactions
+        return pd.DataFrame(transactions)
 
 
 def detect_statement_type(pdf_path: Path) -> str:
@@ -593,7 +676,7 @@ def detect_statement_type(pdf_path: Path) -> str:
         return "visa"
 
 
-def extract_to_csv(pdf_path: Path) -> str:
+def extract_to_csv(pdf_path: Path) -> pd.DataFrame:
     """
     Extract transactions from a PDF and return CSV content as a string.
 
@@ -610,18 +693,4 @@ def extract_to_csv(pdf_path: Path) -> str:
     else:
         extractor = ChequingSavingsStatementExtractor()
 
-    transactions = extractor.extract(pdf_path)
-
-    if not transactions:
-        raise ValueError(f"No transactions found in {pdf_path}")
-
-    # Generate CSV content
-    output = io.StringIO()
-    fieldnames = list(transactions[0].keys())
-    writer = csv.DictWriter(output, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(transactions)
-    csv_content = output.getvalue()
-    output.close()
-
-    return csv_content
+    return extractor.extract(pdf_path)

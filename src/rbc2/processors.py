@@ -22,16 +22,17 @@ def iso8601_date(d: str) -> str:
     Raises:
         ValueError: If date format is not supported
     """
-    try:
+    # if d is a Timestamp, format it as YYYY-MM-DD
+    if isinstance(d, pd.Timestamp):
+        return d.strftime("%Y-%m-%d")
+    if re.match(r"^\d{4}/\d{2}/\d{2}$", d):
         return datetime.strptime(d, "%Y/%m/%d").strftime("%Y-%m-%d")
-    except ValueError:
-        pass
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", d):
+        return d
+    if re.match(r"^\d{2}-\d{2}-\d{4}$", d):
+        return datetime.strptime(d, "%d-%m-%Y").strftime("%Y-%m-%d")
     try:
         return datetime.strptime(d, "%B %d, %Y").strftime("%Y-%m-%d")
-    except ValueError:
-        pass
-    try:
-        return datetime.strptime(d, "%Y-%m-%d").strftime("%Y-%m-%d")
     except ValueError:
         pass
     raise ValueError(f"unsupported date format: {d}")
@@ -72,7 +73,7 @@ def sanitize_description(description: str) -> str:
     return re.sub(r"\n+", " ", description)
 
 
-def normalize_csv(input_path: Path, csv_content: str = None) -> str:
+def normalize_csv(input_path: Path, transactions_df: pd.DataFrame = None) -> pd.DataFrame:
     """
     Normalize a CSV file to a standard format.
 
@@ -89,10 +90,9 @@ def normalize_csv(input_path: Path, csv_content: str = None) -> str:
     Returns:
         Normalized CSV content as string
     """
-    if csv_content is None:
+    df = transactions_df
+    if df is None:
         df = pd.read_csv(input_path)
-    else:
-        df = pd.read_csv(StringIO(csv_content))
 
     # Determine the source PDF filename
     if "File" not in df.columns:
@@ -120,6 +120,6 @@ def normalize_csv(input_path: Path, csv_content: str = None) -> str:
     df = df[~df["Description"].str.contains("Closing balance", na=False, case=False)]
 
     df = df[["Date", "File", "Description", "Amount"]]
-    normalized_csv = df.to_csv(index=False, quoting=csv.QUOTE_MINIMAL)
+    # normalized_csv = df.to_csv(index=False, quoting=csv.QUOTE_MINIMAL)
 
-    return normalized_csv
+    return df

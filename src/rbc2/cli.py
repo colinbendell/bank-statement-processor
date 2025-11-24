@@ -1,111 +1,103 @@
 """Command-line interface for rbc-pdf-to-csv."""
 
 from pathlib import Path
+import csv
 
 import click
 
 from . import __version__
 from .extractors import extract_to_csv
 from .processors import normalize_csv
+from .classifier import Classifier
 from .categorizer import add_categories, initialize_category_lookup
 
 
-@click.group()
 @click.version_option(version=__version__)
-def main():
-    """Convert bank statement PDFs to CSV files."""
-    pass
-
-
-@main.command()
-@click.argument("pdf_path", type=click.Path(exists=True, path_type=Path))
+@click.command()
+@click.argument("files", nargs=-1, type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-C",
+    "--categories",
+    type=click.Path(exists=True, path_type=Path),
+    help="Use the categories training file to categorize the CSV file",
+)
 @click.option(
     "--output",
     "-o",
-    type=click.Path(path_type=Path),
+    type=str,
     help="Output CSV file path (default: same as input with .csv extension)",
 )
+@click.option("--artifacts", is_flag=True, help="Save the artifacts of the process")
 @click.option("-y", "--overwrite", is_flag=True, help="Overwrite existing CSV files")
-def extract(pdf_path: Path, output: Path | None, overwrite: bool):
-    """Extract transactions from a PDF to CSV format."""
-    try:
-        # check if the pdf_path is a directory
-        files = [pdf_path]
-        if pdf_path.is_dir():
-            files = list(sorted(pdf_path.glob("*.pdf")))
-            output = None
-        for file in sorted(files):
-            output_path = file.with_suffix(".csv") if output is None else output
-            if output_path.exists() and not overwrite:
-                click.echo(f"☑️ SKIPPED: {output_path}")
-                continue
-            csv_content = extract_to_csv(file)
-            with open(output_path, "w") as f:
-                f.write(csv_content)
-            click.echo(f"✅ {output_path}")
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        raise click.Abort() from e
-
-
-@main.command()
-@click.argument("files", nargs=-1, type=click.Path(exists=True, path_type=Path))
-@click.option("-C", "--categories", type=click.Path(exists=True, path_type=Path), help="Add categories to the CSV file")
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(path_type=Path),
-    help="Output CSV file path (default: same as input with .processed.csv extension)",
-)
-@click.option("-y", "--overwrite", is_flag=True, help="Overwrite existing CSV files")
+@click.option("--dry-run", is_flag=True, help="Dry run the process and don't write any files")
 @click.option(
     "--use-llm",
     is_flag=True,
     help="Use LLM to infer categories for uncategorized transactions (requires ANTHROPIC_API_KEY env var)",
 )
-def process(files: Path, output: Path | None, categories: Path | None, overwrite: bool, use_llm: bool):
-    """Normalize a CSV file to standard format."""
+def main(
+    files: Path,
+    output: Path | None,
+    categories: Path | None,
+    artifacts: bool,
+    overwrite: bool,
+    dry_run: bool,
+    use_llm: bool,
+):
+    """Convert PDF statements to normalized CSV format."""
     # check if the pdf_path is a directory
-    dir_paths = [file_path for file_path in files if file_path.is_dir()]
-    for dir_path in dir_paths:
-        pdf_files = list(dir_path.glob("*.pdf"))
-        csv_files = list(dir_path.glob("*.csv"))
-        files = [file for file in files if not file.with_suffix(".processed.csv")]
-        for csv_file in csv_files:
-            if not csv_file.with_suffix(".processed.csv") and csv_file not in files:
-                files.append(csv_file)
-        for pdf_file in pdf_files:
-            # check if the file is in the list
-            # remove .pdf files where we have a .csv file in the array
-            if pdf_file.with_suffix(".csv") not in files:
-                files.append(pdf_file)
-    if len(files) > 1:
+    working_files = {file_path for file_path in files if not file_path.is_dir()}
+    for dir_path in (file_path for file_path in files if file_path.is_dir()):
+        csv_files = set(dir_path.glob("**/*.extracted.csv"))
+        working_files.update(csv_files)
+
+        # Only add PDFs that don't have a corresponding extracted.csv file
+        pdf_files = dir_path.glob("**/*.pdf")
+        working_files.update(f for f in pdf_files if f.with_suffix(".extracted.csv") not in csv_files)
+    if len(working_files) > 1 and output is not None and output != "-" and not output.startswith("/dev/null"):
         output = None
-    files = sorted(files)
-    for file in sorted(files):
-        processed_path = file.with_suffix(".processed.csv") if output is None else output
-        if processed_path.exists() and not overwrite:
-            click.echo(f"☑️ SKIPPED: {processed_path}")
+    for file in sorted(list(working_files)):
+        output_path = (
+            Path(str(file).replace(".extracted.csv", ".csv")).with_suffix(".csv")
+            if output is None and output != "-"
+            else output
+        )
+        if output_path != "-" and Path(output_path).exists() and not overwrite:
+            click.echo(f"☑️ SKIPPED: {output_path}")
             continue
 
         # check if we need to convert the file to csv first
-        if file.suffix == ".csv":
-            csv_content = open(file).read()
+        if str(file).endswith(".extracted.csv"):
+            output_df = pd.read_csv(file)
         else:
-            csv_content = extract_to_csv(file)
+            output_df = extract_to_csv(file)
+            if artifacts:
+                with open(output_path.with_suffix(".extracted.csv"), "w") as f:
+                    output_df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
+        if output_df is None:
+            click.echo(f"❌ {file} - No transactions found")
+            continue
 
-        normalized_csv = normalize_csv(file, csv_content)
+        output_df = normalize_csv(file, output_df)
 
-        with open(processed_path, "w") as f:
-            f.write(normalized_csv)
+        if artifacts:
+            with open(output_path.with_suffix(".processed.csv"), "w") as f:
+                output_df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
 
         if categories:
-            initialize_category_lookup(categories)
-            categorized_csv = add_categories(normalized_csv, use_llm=use_llm)
-            categorized_path = file.with_suffix(".categorized.csv")
-            with open(categorized_path, "w") as f:
-                f.write(categorized_csv)
-        click.echo(f"✅ {processed_path}")
+            classifier = Classifier(categories)
+            output_df = classifier.categorize_transactions(output_df, use_llm=use_llm)
+            if artifacts:
+                with open(output_path.with_suffix(".categorized.csv"), "w") as f:
+                    output_df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
+
+        if not dry_run and output_path != "-":
+            with open(output_path, "w") as f:
+                output_df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
+            click.echo(f"✅ {output_path}")
+        if output_path == "-":
+            print(output_df.to_csv(index=False, quoting=csv.QUOTE_MINIMAL))
+            print(output_csv)
 
 
 if __name__ == "__main__":

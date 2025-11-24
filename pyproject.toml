@@ -67,3 +67,4 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "--strict-markers -n auto"
+filterwarnings = ["ignore:.*swigvarlink.*__module__ attribute:DeprecationWarning", "ignore:.*SwigPyObject.*__module__ attribute:DeprecationWarning", "ignore:.*SwigPyPacked.*__module__ attribute:DeprecationWarning"]
