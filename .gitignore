@@ -31,3 +31,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.log
+
+
+samples/
+inputs/
+.claude/*local.json

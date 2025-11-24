@@ -152,3 +152,4 @@ The normalization step in [processors.py](src/rbc2/processors.py) must preserve 
 - The dates are presented in chronological order. If the statement goes from December 2023 and the first transaction date is January, you can assume that this is January 2024 which is after December 2023
 - Spaces should be preserved in the Description even though the pdf blocks might not make the spaces obvious. For example: "Online Banking payment - 6271 OTTAWA-TAX" not "OnlineBankingpayment-6271OTTAWA-TAX"
 - Multiple spaces (`  `) can safely be re-interpreted as a single space (` `)
+- Format all dates in ISO8601. For example 2025-11-12 for date segments
