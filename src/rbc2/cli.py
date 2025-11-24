@@ -9,11 +9,18 @@ from . import __version__
 from .extractors import extract_to_csv
 from .processors import normalize_csv
 from .classifier import Classifier
-from .categorizer import add_categories, initialize_category_lookup
+from .account_metadata import extract_statement_metadata
+import pandas as pd
 
 
+@click.group()
 @click.version_option(version=__version__)
-@click.command()
+def cli():
+    """RBC PDF to CSV converter and statement processor."""
+    pass
+
+
+@cli.command(name="convert")
 @click.argument("files", nargs=-1, type=click.Path(exists=True, path_type=Path))
 @click.option(
     "-C",
@@ -35,7 +42,7 @@ from .categorizer import add_categories, initialize_category_lookup
     is_flag=True,
     help="Use LLM to infer categories for uncategorized transactions (requires ANTHROPIC_API_KEY env var)",
 )
-def main(
+def convert(
     files: Path,
     output: Path | None,
     categories: Path | None,
@@ -97,7 +104,50 @@ def main(
             click.echo(f"✅ {output_path}")
         if output_path == "-":
             print(output_df.to_csv(index=False, quoting=csv.QUOTE_MINIMAL))
-            print(output_csv)
+
+
+@cli.command(name="accounts")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+def accounts(path: Path):
+    """Extract account metadata from PDF statements.
+
+    Analyzes PDF bank statements to extract account numbers, account types
+    (personal/business), and account classifications (visa/chequing/savings).
+
+    PATH can be a single PDF file or a directory containing PDFs.
+    If a directory is provided, all PDFs will be processed recursively.
+    """
+    # Collect PDF files
+    if path.is_file():
+        pdf_files = [path]
+    else:
+        pdf_files = sorted(path.rglob("*.pdf"))
+
+    if not pdf_files:
+        click.echo(f"No PDF files found in {path}", err=True)
+        return
+
+    click.echo(f"Processing {len(pdf_files)} PDF files...")
+
+    # Extract account information
+    results = extract_statement_metadata(pdf_files)
+
+    for result in results:
+        filestem = Path(result["file"]).stem
+        click.echo(f"🔍 {filestem} - {result['account_type']}/{result['account_class']}/{result['account_number']}")
+
+
+@cli.command(name="main")
+@click.pass_context
+def main_compat(ctx):
+    """Legacy main command (deprecated - use 'convert' instead)."""
+    click.echo("Warning: 'main' command is deprecated. Use 'convert' instead.", err=True)
+    ctx.invoke(convert)
+
+
+def main():
+    """Entry point for the CLI."""
+    cli()
 
 
 if __name__ == "__main__":
