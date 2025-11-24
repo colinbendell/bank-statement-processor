@@ -59,7 +59,7 @@ PERSONAL_PATTERN = re.compile(r"\bpersonal\b", re.IGNORECASE)
 BUSINESS_PATTERN = re.compile(r"\b(business|commercial)\b", re.IGNORECASE)
 
 
-def _extract_account_type(pdf_pages: list[str]) -> str:
+def _extract_account_use(pdf_pages: list[str]) -> str:
     """Determine if account is personal or business.
 
     Args:
@@ -84,7 +84,7 @@ def _extract_account_type(pdf_pages: list[str]) -> str:
     return "PERSONAL"
 
 
-def _extract_account_class(pdf_pages: str) -> str:
+def _extract_account_type(pdf_pages: str) -> str:
     """Determine account classification (visa/chequing/savings).
 
     Args:
@@ -124,8 +124,8 @@ def extract_statement_metadata(pdf_paths: list[Path]) -> list[dict[str, str]]:
         Dictionary with the following keys:
         - file: Full path to the PDF file
         - account_number: Extracted account number or 'NOT_FOUND'
-        - account_type: 'PERSONAL', 'BUSINESS', or 'UNKNOWN'
-        - account_class: 'VISA', 'CHEQUING', 'SAVINGS', or 'UNKNOWN'
+        - account_use: 'PERSONAL', 'BUSINESS', or 'UNKNOWN'
+        - account_type: 'VISA', 'CHEQUING', 'SAVINGS', or 'UNKNOWN'
 
     Examples:
         >>> from pathlib import Path
@@ -135,9 +135,9 @@ def extract_statement_metadata(pdf_paths: list[Path]) -> list[dict[str, str]]:
         2
         >>> print(results[0]['account_number'])
         '01592-5076500'
-        >>> print(results[0]['account_type'])
+        >>> print(results[0]['account_use'])
         'PERSONAL'
-        >>> print(results[0]['account_class'])
+        >>> print(results[0]['account_type'])
         'CHEQUING'
 
     """
@@ -148,16 +148,16 @@ def extract_statement_metadata(pdf_paths: list[Path]) -> list[dict[str, str]]:
             for pdf_page in pdf:
                 all_text.append(" ".join(pdf_page.get_text().split()))
 
+            account_use = _extract_account_use(all_text)
             account_type = _extract_account_type(all_text)
-            account_class = _extract_account_class(all_text)
             account_numbers = _extract_account_number(all_text)
 
             for account_number in account_numbers:
                 results.append(
                     {
                         "account_number": account_number,
+                        "account_use": account_use,
                         "account_type": account_type,
-                        "account_class": account_class,
                         "file": pdf_path,
                     }
                 )

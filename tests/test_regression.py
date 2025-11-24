@@ -48,7 +48,7 @@ def test_end_to_end_regression(pdf_path):
     pdt.assert_frame_equal(actual_df, expected_df, check_like=False)
 
     processed_csv = pdf_path.with_suffix(".processed.csv")
-    actual_df = normalize_csv(pdf_path, actual_df)
+    actual_df = normalize_csv(actual_df)
 
     expected_df = pd.read_csv(processed_csv)
     pdt.assert_frame_equal(actual_df, expected_df, check_like=False)

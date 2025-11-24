@@ -21,7 +21,7 @@ def test_csv_normalization(pdf_path):
         pytest.skip("No CSV file found for PDF")
     # Normalize CSV
     df = pd.read_csv(csv_path)
-    actual_output = normalize_csv(pdf_path, transactions_df=df)
+    actual_output = normalize_csv(transactions_df=df)
 
     # Verify it has the correct format
     expected_processed_csv = pdf_path.with_suffix(".processed.csv")
@@ -40,7 +40,7 @@ def test_chequing_normalization():
         pytest.skip("No chequing/savings CSV found in samples")
 
     df = pd.read_csv(chequing_csv)
-    df = normalize_csv(chequing_pdf, transactions_df=df)
+    df = normalize_csv(transactions_df=df)
 
     # Check the format
     assert "Date" in df.columns
