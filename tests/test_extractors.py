@@ -3,8 +3,8 @@
 from pathlib import Path
 import pandas as pd
 import pytest
-
-from rbc2.extractors import detect_statement_type, extract_to_csv
+import pymupdf
+from rbc2.extractors import StatementExtractor, extract_to_csv
 
 # Get all PDF files in the samples directory
 SAMPLES_DIR = Path(__file__).parent.parent / "samples"
@@ -27,17 +27,18 @@ def test_pdf_extraction(pdf_path):
 @pytest.mark.parametrize("pdf_path", PDF_FILES, ids=[p.stem for p in PDF_FILES])
 def test_statement_type_detection(pdf_path):
     """Test that statement type is correctly detected."""
-    statement_type = detect_statement_type(pdf_path)
-    assert statement_type in ["visa", "chequing", "savings"]
+    with pymupdf.open(pdf_path) as pdf:
+        statement_type = StatementExtractor.extract_account_type(pdf)
+        assert statement_type in ["visa", "chequing", "savings"]
 
-    # Verify the detected type makes sense based on filename
-    filename_lower = pdf_path.stem.lower()
-    if "visa" in filename_lower:
-        assert statement_type == "visa"
-    elif "chequing" in filename_lower:
-        assert statement_type == "chequing"
-    elif "savings" in filename_lower:
-        assert statement_type in ["savings", "chequing"]  # Both use same format
+        # Verify the detected type makes sense based on filename
+        filename_lower = pdf_path.stem.lower()
+        if "visa" in filename_lower:
+            assert statement_type == "visa"
+        elif "chequing" in filename_lower:
+            assert statement_type == "chequing"
+        elif "savings" in filename_lower:
+            assert statement_type in ["savings", "chequing"]  # Both use same format
 
 
 def test_visa_extraction_format():

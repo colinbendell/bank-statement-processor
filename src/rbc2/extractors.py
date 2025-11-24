@@ -64,7 +64,8 @@ class StatementExtractor:
 
     SPACE_REGEX = re.compile(r"\s+")
 
-    def extract_account_numbers(self, pdf_doc: pymupdf.Document) -> list[str]:
+    @staticmethod
+    def extract_account_numbers(pdf_doc: pymupdf.Document) -> list[str]:
         """Extract account number from PDF text using multiple patterns.
 
         Args:
@@ -78,24 +79,24 @@ class StatementExtractor:
         for page in pdf_doc:
             page_text = page.get_text()
             # Pattern 1: "Account Number: XXXXX" or "Your account number: XXXXX"
-            account_match = self.ACCOUNT_NUMBER_PATTERN.findall(page_text)
+            account_match = StatementExtractor.ACCOUNT_NUMBER_PATTERN.findall(page_text)
             if len(account_match) > 0:
                 for card in account_match:
                     # Clean up the account number - remove all spaces and keep dashes
-                    results.append(self.SPACE_REGEX.sub(" ", card).strip())
+                    results.append(StatementExtractor.SPACE_REGEX.sub(" ", card).strip())
                 continue
 
             # Pattern 2: Visa card numbers like "4516 07** **** 9998"
             # Must search in all_text (not clean_text) to preserve spacing pattern
-            card_match = self.CARD_NUMBER_PATTERN.findall(page_text)
+            card_match = StatementExtractor.CARD_NUMBER_PATTERN.findall(page_text)
             if len(card_match) > 0:
                 for card in card_match:
                     if "*" in card:
-                        results.append(self.SPACE_REGEX.sub(" ", card).strip())
+                        results.append(StatementExtractor.SPACE_REGEX.sub(" ", card).strip())
                 continue
 
             # Pattern 3: Generic card ending pattern
-            card_match = self.CARD_ENDING_PATTERN.findall(page_text)
+            card_match = StatementExtractor.CARD_ENDING_PATTERN.findall(page_text)
             for card in card_match:
                 results.append(f"****{card}")
 
@@ -106,7 +107,8 @@ class StatementExtractor:
     PERSONAL_PATTERN = re.compile(r"\bpersonal\b", re.IGNORECASE)
     BUSINESS_PATTERN = re.compile(r"\b(business|commercial)\b", re.IGNORECASE)
 
-    def extract_account_use(self, pdf_doc: pymupdf.Document) -> str:
+    @staticmethod
+    def extract_account_use(pdf_doc: pymupdf.Document) -> str:
         """Determine if account is personal or business.
 
         Args:
@@ -121,16 +123,17 @@ class StatementExtractor:
         for page in pdf_doc:
             header = page.get_text()[:400]
             # Check for personal first (more specific)
-            if self.PERSONAL_PATTERN.search(header):
+            if StatementExtractor.PERSONAL_PATTERN.search(header):
                 return "personal"
 
             # Then check for business indicators
-            if self.BUSINESS_PATTERN.search(header):
+            if StatementExtractor.BUSINESS_PATTERN.search(header):
                 return "business"
 
         return "personal"
 
-    def extract_account_type(self, pdf_doc: pymupdf.Document) -> str:
+    @staticmethod
+    def extract_account_type(pdf_doc: pymupdf.Document) -> str:
         """Determine account classification (visa/chequing/savings).
 
         Args:
@@ -143,17 +146,17 @@ class StatementExtractor:
             page_text = page.get_text()[:400]
 
             if match := re.search(r"(visa|master card)", page_text, re.IGNORECASE):
-                return match.group(0).lower().replace(" ", "_")
+                return match.group(0).lower()
 
             if re.search(r"credit card|cardholder agreement", page_text, re.IGNORECASE):
-                return "credit_card"
+                return "credit card"
 
             # Check for savings account
             if re.search(r"savings?\s*account|esavings", page_text, re.IGNORECASE):
                 return "savings"
 
             # Check for chequing - look for "chequing account" or "banking account"
-            if re.search(r"(?:chequing|banking)\s*account", page_text, re.IGNORECASE):
+            if re.search(r"(?:chequing|banking|checking)\s*account", page_text, re.IGNORECASE):
                 return "chequing"
 
             # Fallback to broader patterns
@@ -709,37 +712,6 @@ class ChequingSavingsStatementExtractor(StatementExtractor):
 
         return pd.DataFrame(transactions)
 
-
-def detect_statement_type(pdf_path: Path) -> str:
-    """Detect the type of bank statement from the PDF content."""
-    doc = pymupdf.open(pdf_path)
-
-    if not doc:
-        raise ValueError(f"Cannot open PDF file {pdf_path}")
-
-    text = doc[0].get_text()
-    doc.close()
-
-    if not text:
-        raise ValueError(f"Cannot extract text from {pdf_path}")
-
-    text_lower = text.lower()
-
-    # Check for specific account types first (more specific matches)
-    if "chequing" in text_lower or "checking" in text_lower:
-        return "chequing"
-    elif "savings" in text_lower:
-        return "savings"
-    # Then check for visa/credit card (more general, can appear in warnings/ads)
-    elif "visa" in text_lower or "credit card" in text_lower:
-        return "visa"
-    else:
-        # Fallback: if has withdrawal/deposit columns, it's likely chequing/savings
-        if "withdrawal" in text_lower or "deposit" in text_lower:
-            return "chequing"
-        return "visa"
-
-
 def extract_to_csv(pdf_path: Path) -> pd.DataFrame:
     """
     Extract transactions from a PDF and return CSV content as a string.
@@ -751,19 +723,16 @@ def extract_to_csv(pdf_path: Path) -> pd.DataFrame:
         CSV content as a string
     """
     with pymupdf.open(pdf_path) as pdf:
-        all_text = []
-        for pdf_page in pdf:
-            all_text.append(" ".join(pdf_page.get_text().split()))
 
-        # account_use = _extract_account_use(all_text)
-        # account_type = _extract_account_type(all_text)
-        # account_numbers = _extract_account_number(all_text)
-        # statement_end_date = _extract_statement_end_date(all_text)
+        account_use = StatementExtractor.extract_account_use(pdf)
+        account_type = StatementExtractor.extract_account_type(pdf)
+        account_numbers = list(StatementExtractor.extract_account_numbers(pdf))
+        # TODO: make this based on frequency
+        account_number = account_numbers[-1]
 
-        statement_type = detect_statement_type(pdf_path)
         # file = "personal/rbc/visa/141232/2025-08-20.pdf"
 
-        if statement_type == "visa":
+        if account_type in ["visa", "master card", "credit card"]:
             extractor = VisaStatementExtractor()
         else:
             extractor = ChequingSavingsStatementExtractor()
@@ -771,13 +740,9 @@ def extract_to_csv(pdf_path: Path) -> pd.DataFrame:
         if df.empty:
             return df
 
-        account_use = extractor.extract_account_use(pdf)
-        account_type = extractor.extract_account_type(pdf)
-        account_numbers = list(extractor.extract_account_numbers(pdf))
-        # TODO: make this based on frequency
-        account_number = account_numbers[-1]
-        start_date, end_date = extractor.statement_period(pdf)
+        _start_date, end_date = extractor.statement_period(pdf)
+        filename = f"{account_use}_{account_type.replace(' ', '_')}_{account_number.replace(' ', '-')}_{end_date.strftime('%Y_%m_%d')}"
 
-        df["File"] = f"{account_use}_{account_type}_{account_number.replace(' ', '-')}_{end_date.strftime('%Y_%m_%d')}"
+        df["File"] = filename
 
     return df

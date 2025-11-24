@@ -103,6 +103,7 @@ def convert(
                 output_df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
             click.echo(f"✅ {output_path}")
         if output_path == "-":
+            click.echo(f"✅ {file}", err=True)
             print(output_df.to_csv(index=False, quoting=csv.QUOTE_MINIMAL))
 
 
