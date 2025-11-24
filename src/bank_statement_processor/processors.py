@@ -1,13 +1,9 @@
 """CSV normalization and post-processing logic."""
 
-import csv
-from io import StringIO
-from pathlib import Path
-from re import S
-import pandas as pd
-from .extractors import extract_to_csv
-from datetime import datetime
 import re
+from datetime import datetime
+
+import pandas as pd
 
 
 def iso8601_date(d: str) -> str:

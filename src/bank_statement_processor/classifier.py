@@ -3,26 +3,16 @@
 import csv
 import os
 import re
-from pathlib import Path
-from typing import Any
 from io import StringIO
+from pathlib import Path
+
 import pandas as pd
 from anthropic import Anthropic
 from dotenv import load_dotenv
-from rapidfuzz import process, fuzz
-from dataclasses import dataclass, field
-from typing import List
-
+from rapidfuzz import fuzz
 
 # Load environment variables from .env file
 load_dotenv()
-
-
-@dataclass
-class Cluster:
-    category: str = ""
-    members: List[str] = field(default_factory=list)
-    rep: str = ""  # representative string used for matching
 
 
 class Classifier:
@@ -34,11 +24,11 @@ class Classifier:
         Args:
             categories_csv_path: Path to the categories.csv file
         """
-        self._category_clusters: list[Cluster] = []
-        self._category_lookup: dict[str, str] = {}
+        self._category_training: dict[str, str] = {}
+        self._category_amount_training: dict[str, str] = {}
 
         if categories_csv_path is not None and categories_csv_path.exists():
-            with open(categories_csv_path, "r", encoding="utf-8") as f:
+            with open(categories_csv_path, encoding="utf-8") as f:
                 csv_content = f.read()
             self._initialize_category_lookup(StringIO(csv_content))
 
@@ -54,48 +44,6 @@ class Classifier:
         norm = Classifier.NON_ALPHA_PATTERN.sub(" ", norm.lower()).strip()
         return norm
 
-    def get_category_cluster(self, description: str, threshold: int = 90) -> Cluster | None:
-        norm_desc = Classifier.NON_ALPHA_NUM_PATTERN.sub(" ", description.lower()).strip()
-
-        best_cluster = None
-        best_score = threshold -1
-
-        for cluster in self._category_clusters:
-            score = fuzz.WRatio(norm_desc, cluster.rep)
-            if score > best_score:
-                best_score = score
-                best_cluster = cluster
-
-        return best_cluster
-
-
-    def set_category_cluster(self, description: str, category: str = None, threshold: int = 90) -> Cluster:
-        norm_desc = Classifier.NON_ALPHA_NUM_PATTERN.sub(" ", description.lower()).strip()
-
-        best_cluster = None
-        best_score = threshold -1
-
-        for cluster in self._category_clusters:
-            score = fuzz.WRatio(norm_desc, cluster.rep)
-            if score > best_score:
-                if category == None or cluster.category == category:
-                    best_score = score
-                    best_cluster = cluster
-
-        if best_cluster is not None and best_score >= threshold:
-            best_cluster.members.append(norm_desc)
-            # optional: update representative if desired
-            return best_cluster
-
-        # No good match → create a new cluster
-        new_cluster = Cluster(
-            category=category,
-            members=[norm_desc],
-            rep=norm_desc,
-        )
-        self._category_clusters.append(new_cluster)
-        return new_cluster
-
     def set_category(self, description: str, amount: float, category: str) -> None:
         """Add a category to the lookup dictionary.
 
@@ -105,14 +53,16 @@ class Classifier:
             category: Category string
         """
         norm_desc = Classifier.normalize_description(description)
-        category_set = self._category_lookup.setdefault(norm_desc, set())
+        category_set = self._category_training.setdefault(norm_desc, set())
         category_set.add(category)
 
-        norm_amount = int(abs(amount))
-        category_set = self._category_lookup.setdefault(f"{norm_desc} | {norm_amount}", set())
+        key = f"{amount:+g} || {norm_desc}"
+        category_set = self._category_training.setdefault(key, set())
         category_set.add(category)
 
-        self.set_category_cluster(f"{description} {norm_amount}", category, threshold=90)
+        key = f"{float(format(amount, '.1g')):+g} || {norm_desc}"
+        category_set = self._category_amount_training.setdefault(key, set())
+        category_set.add(category)
 
     def get_category(self, description: str, amount: float) -> str | None:
         """Get the category for a given description and amount.
@@ -125,18 +75,27 @@ class Classifier:
             Category string if found, None otherwise
         """
         norm_desc = Classifier.normalize_description(description)
-        norm_amount = int(abs(amount))
-        category_set = self._category_lookup.get(f"{norm_desc} | {norm_amount}", set())
-        if len(category_set) == 1:
-            return list(category_set)[0]
-        category_set = self._category_lookup.get(norm_desc, set())
-        if len(category_set) == 1:
+        key = f"{amount:+g} || {norm_desc}"
+        if len(category_set := self._category_training.get(key, set())) == 1:
             return list(category_set)[0]
 
-        cluster = self.get_category_cluster(f"{description}", threshold=80)
-        if cluster is not None and cluster.category is not None:
-            # print(f"**: {description} {amount} {cluster.category}")
-            return cluster.category + "**"
+        if len(category_set := self._category_training.get(norm_desc, set())) == 1:
+            return list(category_set)[0]
+
+        category = None
+        threshold = 90
+        key = f"{norm_desc} || {float(format(amount, '.1g')):+g}"
+        for target_key, category_set in self._category_amount_training.items():
+            if len(category_set) > 1:
+                continue
+            score = fuzz.WRatio(key, target_key)
+            if score >= threshold:
+                threshold = score
+                category = list(category_set)[0]
+
+        if category is not None:
+            # print(f"**: {description} {amount} {category}")
+            return category + "**"
 
         return None
 
@@ -181,7 +140,7 @@ class Classifier:
         # Sample existing categories for context (limit to 20 unique categories)
         category_examples = []
         seen_categories = set()
-        for _, category in list(self._category_lookup.items())[:100]:
+        for _, category in list(self._category_training.items())[:100]:
             if category not in seen_categories:
                 category_examples.append(f"- {category}")
                 seen_categories.add(category)

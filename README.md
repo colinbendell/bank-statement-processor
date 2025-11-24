@@ -24,7 +24,7 @@ Then install the project:
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd rbc2
+cd bank_statement_processor
 
 # Install dependencies
 uv sync --dev
@@ -108,7 +108,7 @@ The project includes a comprehensive test suite using pytest:
 uv run pytest
 
 # Run with coverage
-uv run pytest --cov=src/rbc2 --cov-report=html
+uv run pytest --cov=src/bank_statement_processor --cov-report=html
 
 # Run only regression tests
 uv run pytest tests/test_regression.py -v
@@ -144,8 +144,8 @@ uv run ruff format src/ tests/
 ### Project Structure
 
 ```
-rbc2/
-├── src/rbc2/
+bank_statement_processor/
+├── src/bank_statement_processor/
 │   ├── __init__.py
 │   ├── cli.py          # Click-based CLI interface
 │   ├── extractors.py   # PDF extraction logic
@@ -196,7 +196,7 @@ The processor standardizes the extracted data:
 
 1. Add your test case to `samples/`
 2. Run tests to identify issues: `uv run pytest -v`
-3. Improve extraction logic in `src/rbc2/extractors.py`
+3. Improve extraction logic in `src/bank_statement_processor/extractors.py`
 4. Ensure tests pass: `uv run pytest`
 5. Check code quality: `uv run ruff check src/`
 

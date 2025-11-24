@@ -1,16 +1,14 @@
 """Regression tests comparing output against known-good sample files."""
 
-from io import StringIO
 from pathlib import Path
 
 import pandas as pd
 import pandas.testing as pdt
 import pytest
 
-
-from rbc2.processors import normalize_csv
-from rbc2.extractors import extract_to_csv
-from rbc2.classifier import Classifier
+from bank_statement_processor.classifier import Classifier
+from bank_statement_processor.extractors import extract_to_csv
+from bank_statement_processor.processors import normalize_csv
 
 SAMPLES_DIR = Path(__file__).parent.parent / "samples"
 PDF_FILES = list(SAMPLES_DIR.glob("*.pdf"))

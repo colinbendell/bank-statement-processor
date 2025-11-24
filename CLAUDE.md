@@ -40,7 +40,7 @@ uv run rbc-pdf-to-csv batch path/to/directory/
 uv run pytest
 
 # Run with coverage report
-uv run pytest --cov=src/rbc2 --cov-report=html
+uv run pytest --cov=src/bank_statement_processor --cov-report=html
 
 # Run specific test file
 uv run pytest tests/test_regression.py -v
@@ -65,24 +65,24 @@ uv run ruff format src/ tests/
 
 ### Three-Stage Processing Pipeline
 
-1. **Detection** ([extractors.py:198-221](src/rbc2/extractors.py#L198-L221))
+1. **Detection** ([extractors.py:198-221](src/bank_statement_processor/extractors.py#L198-L221))
    - `detect_statement_type()` analyzes PDF text to identify statement type
    - Returns 'visa', 'chequing', or 'savings' based on keywords
 
-2. **Extraction** ([extractors.py](src/rbc2/extractors.py))
+2. **Extraction** ([extractors.py](src/bank_statement_processor/extractors.py))
    - Uses statement-specific extractors that inherit from `StatementExtractor`
    - `VisaStatementExtractor`: Parses transaction/posting dates, descriptions, amounts
    - `ChequingSavingsStatementExtractor`: Parses dates, descriptions, withdrawals/deposits/balances
    - Each extractor handles date parsing with year rollover logic
 
-3. **Normalization** ([processors.py](src/rbc2/processors.py))
+3. **Normalization** ([processors.py](src/bank_statement_processor/processors.py))
    - Converts all statement formats to unified schema: Date, File, Description, Amount
    - Handles sign conventions: positive = deposits/credits, negative = withdrawals/debits
    - **Important**: Visa amounts are inverted (payments become positive, charges become negative)
 
 ### Date Parsing Logic
 
-The extractors handle abbreviated date formats (e.g., "NOV17", "21Mar") and must infer the year from the statement period. The critical logic in [extractors.py:19-51](src/rbc2/extractors.py#L19-L51) handles:
+The extractors handle abbreviated date formats (e.g., "NOV17", "21Mar") and must infer the year from the statement period. The critical logic in [extractors.py:19-51](src/bank_statement_processor/extractors.py#L19-L51) handles:
 - Year rollover detection (when month < current_month and current_month >= 11)
 - Multiple date format patterns (MMMDD and DDMMM)
 - Statement period extraction from first page text
@@ -90,8 +90,8 @@ The extractors handle abbreviated date formats (e.g., "NOV17", "21Mar") and must
 ### Regex Patterns
 
 Transaction parsing relies on regex patterns that match specific statement layouts:
-- **Visa** [extractors.py:95-98](src/rbc2/extractors.py#L95-L98): Matches "MMMDD MMMDD Description $Amount"
-- **Chequing/Savings** [extractors.py:163-166](src/rbc2/extractors.py#L163-L166): Matches "DDMmm Description Amount1 [Amount2]"
+- **Visa** [extractors.py:95-98](src/bank_statement_processor/extractors.py#L95-L98): Matches "MMMDD MMMDD Description $Amount"
+- **Chequing/Savings** [extractors.py:163-166](src/bank_statement_processor/extractors.py#L163-L166): Matches "DDMmm Description Amount1 [Amount2]"
 
 When modifying patterns, test against all samples in `samples/` directory.
 
@@ -123,10 +123,10 @@ The regression test suite ([tests/test_regression.py](tests/test_regression.py))
 
 ### Modifying Normalization Logic
 
-The normalization step in [processors.py](src/rbc2/processors.py) must preserve the sign convention:
+The normalization step in [processors.py](src/bank_statement_processor/processors.py) must preserve the sign convention:
 - Deposits/Credits → Positive amounts
 - Withdrawals/Debits → Negative amounts
-- Visa statements require sign inversion ([processors.py:52](src/rbc2/processors.py#L52))
+- Visa statements require sign inversion ([processors.py:52](src/bank_statement_processor/processors.py#L52))
 
 ## Code Style
 

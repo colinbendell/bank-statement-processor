@@ -1,16 +1,16 @@
 """Command-line interface for rbc-pdf-to-csv."""
 
-from pathlib import Path
 import csv
+from pathlib import Path
 
 import click
+import pandas as pd
 
 from . import __version__
+from .account_metadata import extract_statement_metadata
+from .classifier import Classifier
 from .extractors import extract_to_csv
 from .processors import normalize_csv
-from .classifier import Classifier
-from .account_metadata import extract_statement_metadata
-import pandas as pd
 
 
 @click.group()
@@ -63,7 +63,12 @@ def convert(
         working_files.update(f for f in pdf_files if f.with_suffix(".extracted.csv") not in csv_files)
     if len(working_files) > 1 and output is not None and output != "-" and not output.startswith("/dev/null"):
         output = None
-    for file in sorted(list(working_files)):
+
+    if categories:
+        classifier = Classifier(categories)
+
+    include_header = True
+    for file in sorted(working_files):
         output_path = (
             Path(str(file).replace(".extracted.csv", ".csv")).with_suffix(".csv")
             if output is None and output != "-"
@@ -91,8 +96,7 @@ def convert(
             with open(output_path.with_suffix(".processed.csv"), "w") as f:
                 output_df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
 
-        if categories:
-            classifier = Classifier(categories)
+        if classifier:
             output_df = classifier.categorize_transactions(output_df, use_llm=use_llm)
             if artifacts:
                 with open(output_path.with_suffix(".categorized.csv"), "w") as f:
@@ -104,7 +108,8 @@ def convert(
             click.echo(f"✅ {output_path}")
         if output_path == "-":
             click.echo(f"✅ {file}", err=True)
-            print(output_df.to_csv(index=False, quoting=csv.QUOTE_MINIMAL))
+            print(output_df.to_csv(index=False, quoting=csv.QUOTE_MINIMAL, header=include_header))
+            include_header = False
 
 
 @cli.command(name="accounts")
