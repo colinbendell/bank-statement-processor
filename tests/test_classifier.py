@@ -1,12 +1,11 @@
 """Tests for the categorization module."""
 
-from io import StringIO
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from rbc2.classifier import Classifier
+from bank_statement_processor.classifier import Classifier
 
 SAMPLES_DIR = Path(__file__).parent.parent / "samples"
 CSV_FILES = list(SAMPLES_DIR.glob("*.processed.csv"))
@@ -17,11 +16,11 @@ BUSINESS_CATEGORIZER = Classifier(BUSINESS_CATEGORIES_PATH)
 PERSONAL_CATEGORIZER = Classifier(PERSONAL_CATEGORIES_PATH)
 
 DEFAULT_CATEGORIZER = Classifier()
-DEFAULT_CATEGORIZER._category_lookup["uber trip toronto on | 26"] = {"Expenses / Travel"}
-DEFAULT_CATEGORIZER._category_lookup["uber trip toronto on"] = {"Expenses / Travel"}
-DEFAULT_CATEGORIZER._category_lookup["investment md financial | 5000.0"] = {"Investment / MD Management"}
-DEFAULT_CATEGORIZER._category_lookup["investment md financial"] = {"Investment / MD Management"}
-print(DEFAULT_CATEGORIZER._category_lookup)
+DEFAULT_CATEGORIZER._category_training["uber trip toronto on | 26"] = {"Expenses / Travel"}
+DEFAULT_CATEGORIZER._category_training["uber trip toronto on"] = {"Expenses / Travel"}
+DEFAULT_CATEGORIZER._category_training["investment md financial | 5000.0"] = {"Investment / MD Management"}
+DEFAULT_CATEGORIZER._category_training["investment md financial"] = {"Investment / MD Management"}
+print(DEFAULT_CATEGORIZER._category_training)
 
 NORMALIZE_DESCRIPTION_TESTS = [
     ("UBER* TRIP TORONTO ON", "uber trip toronto on"),
@@ -54,7 +53,7 @@ CATEGORIZE_TRANSACTION_TESTS = [
 def test_categorize_transaction(description, amount, expected):
     """Test categorize_transaction function."""
     if amount == -99.99:
-        print(DEFAULT_CATEGORIZER._category_lookup)
+        print(DEFAULT_CATEGORIZER._category_training)
     assert DEFAULT_CATEGORIZER.get_category(description, amount) == expected
 
 

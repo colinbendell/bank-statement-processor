@@ -1,12 +1,12 @@
 """Tests for CSV processors and normalization."""
 
 from pathlib import Path
-from io import StringIO
 
 import pandas as pd
-import pytest
 import pandas.testing as pdt
-from rbc2.processors import normalize_csv
+import pytest
+
+from bank_statement_processor.processors import normalize_csv
 
 SAMPLES_DIR = Path(__file__).parent.parent / "samples"
 PDF_FILES = list(SAMPLES_DIR.glob("*.pdf"))

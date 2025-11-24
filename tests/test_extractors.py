@@ -1,10 +1,12 @@
 """Tests for PDF extractors using sample files."""
 
 from pathlib import Path
+
 import pandas as pd
-import pytest
 import pymupdf
-from rbc2.extractors import StatementExtractor, extract_to_csv
+import pytest
+
+from bank_statement_processor.extractors import StatementExtractor, extract_to_csv
 
 # Get all PDF files in the samples directory
 SAMPLES_DIR = Path(__file__).parent.parent / "samples"
@@ -20,7 +22,7 @@ def test_pdf_extraction(pdf_path):
     actual_df = extract_to_csv(pdf_path)
 
     assert set(expected_df.columns) == set(actual_df.columns)
-    for expected_row, actual_row in zip(expected_df, actual_df):
+    for expected_row, actual_row in zip(expected_df, actual_df, strict=True):
         assert expected_row == actual_row
 
 
@@ -28,7 +30,10 @@ def test_pdf_extraction(pdf_path):
 def test_statement_type_detection(pdf_path):
     """Test that statement type is correctly detected."""
     with pymupdf.open(pdf_path) as pdf:
-        statement_type = StatementExtractor.extract_account_type(pdf)
+        all_text = []
+        for page in pdf:
+            all_text.append(page.get_text())
+        statement_type = StatementExtractor.extract_account_type(all_text)
         assert statement_type in ["visa", "chequing", "savings"]
 
         # Verify the detected type makes sense based on filename

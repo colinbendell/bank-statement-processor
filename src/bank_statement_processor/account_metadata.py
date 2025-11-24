@@ -7,7 +7,6 @@ RBC bank statement PDFs.
 
 import re
 from pathlib import Path
-from typing import Any
 
 import pymupdf
 
