@@ -68,7 +68,7 @@ class VisaStatementExtractor(StatementExtractor):
 
     CC_DATE_PATTERN = re.compile(r"^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[-\s]*(\d{1,2})$", re.IGNORECASE)
     STATEMENT_PERIOD_PATTERN = re.compile(
-        r"(?:STATEMENT\s+)?FROM\s+([A-Z]{3})\s+\d{1,2},?\s*(\d{4})?\s+TO\s+([A-Z]{3})\s+\d{1,2},?\s*(\d{4})",
+        r"(?:STATEMENT\s+)?FROM\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2}),?\s*(\d{4})?\s+TO\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d{1,2}),?\s*(\d{4})",
         re.IGNORECASE,
     )
 
@@ -76,8 +76,19 @@ class VisaStatementExtractor(StatementExtractor):
         """Extract start and end years from statement period."""
         match = self.STATEMENT_PERIOD_PATTERN.search(text)
 
+        # if match:
+        #     s_month, s_day, s_year, e_day, e_month, e_year = match.groups()
+        #     s_month = datetime.strptime(s_month.upper(), "%b").month
+        #     e_month = datetime.strptime(e_month.upper(), "%b").month
+        #     e_year = int(e_year)
+
+        #     if s_year:
+        #         s_year = int(s_year)
+        #     else:
+        #         s_year = e_year - 1 if s_month > e_month else e_year
+        #     return datetime(s_year, s_month, s_day), datetime(e_year, e_month, e_day)
         if match:
-            start_month_str, start_year_str, end_month_str, end_year_str = match.groups()
+            start_month_str, start_day, start_year_str, end_month_str, end_day, end_year_str = match.groups()
             start_month = datetime.strptime(start_month_str.upper(), "%b").month
             end_month = datetime.strptime(end_month_str.upper(), "%b").month
             end_year = int(end_year_str)
@@ -692,5 +703,8 @@ def extract_to_csv(pdf_path: Path) -> pd.DataFrame:
         extractor = VisaStatementExtractor()
     else:
         extractor = ChequingSavingsStatementExtractor()
+    df = extractor.extract(pdf_path)
+    if df.empty:
+        return df
 
-    return extractor.extract(pdf_path)
+    return df

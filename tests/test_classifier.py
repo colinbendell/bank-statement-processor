@@ -17,26 +17,28 @@ BUSINESS_CATEGORIZER = Classifier(BUSINESS_CATEGORIES_PATH)
 PERSONAL_CATEGORIZER = Classifier(PERSONAL_CATEGORIES_PATH)
 
 DEFAULT_CATEGORIZER = Classifier()
-DEFAULT_CATEGORIZER._category_lookup["ubertriptorontoon|26"] = {"Expenses / Travel"}
-DEFAULT_CATEGORIZER._category_lookup["ubertriptorontoon"] = {"Expenses / Travel"}
-DEFAULT_CATEGORIZER._category_lookup["investmentmdfinancial|5000.0"] = {"Investment / MD Management"}
-DEFAULT_CATEGORIZER._category_lookup["investmentmdfinancial"] = {"Investment / MD Management"}
+DEFAULT_CATEGORIZER._category_lookup["uber trip toronto on | 26"] = {"Expenses / Travel"}
+DEFAULT_CATEGORIZER._category_lookup["uber trip toronto on"] = {"Expenses / Travel"}
+DEFAULT_CATEGORIZER._category_lookup["investment md financial | 5000.0"] = {"Investment / MD Management"}
+DEFAULT_CATEGORIZER._category_lookup["investment md financial"] = {"Investment / MD Management"}
+print (DEFAULT_CATEGORIZER._category_lookup)
 
-
-GET_CATEGORY_KEYS_TESTS = [
-    ("UBER* TRIP TORONTO ON", 26.97, ["ubertriptorontoon|26", "ubertriptorontoon"]),
-    ("Online transfer sent - 3248", 2000.00, ["onlinetransfersent|2000", "onlinetransfersent"]),
-    ("Investment MD Financial", 5000.00, ["investmentmdfinancial|5000", "investmentmdfinancial"]),
-    ("Bill Payment GOV NU PAYABLES", 5.12, ["billpaymentgovnupayables|5", "billpaymentgovnupayables"]),
-    ("", 0.00, ["|0", ""]),
-    ("123456", 0.00, ["|0", ""]),
+NORMALIZE_DESCRIPTION_TESTS = [
+    ("UBER* TRIP TORONTO ON", "uber trip toronto on"),
+    ("Online Banking transfer - 3087", "online banking transfer"),
+    ("Investment MD Financial", "investment md financial"),
+    ("Bill Payment GOV NU PAYABLES", "bill payment gov nu payables"),
+    ("Electronic transaction fee 7 Drs @ 0.75 2 Crs @ 0.75", "electronic transaction fee drs crs"),
+    ("INTERAC e-Transfer fee", "interac e transfer fee"),
+    ("", ""),
+    ("123456", ""),
 ]
 
 
-@pytest.mark.parametrize("description, amount, expected", GET_CATEGORY_KEYS_TESTS)
-def GET_CATEGORY_KEYS_TESTS(description, amount, expected):
+@pytest.mark.parametrize("description, expected", NORMALIZE_DESCRIPTION_TESTS)
+def test_normalize_description(description, expected):
     """Test get_category_keys function."""
-    assert DEFAULT_CATEGORIZER._get_category_keys(description, amount) == expected
+    assert DEFAULT_CATEGORIZER.normalize_description(description) == expected
 
 
 CATEGORIZE_TRANSACTION_TESTS = [
@@ -51,6 +53,8 @@ CATEGORIZE_TRANSACTION_TESTS = [
 @pytest.mark.parametrize("description, amount, expected", CATEGORIZE_TRANSACTION_TESTS)
 def test_categorize_transaction(description, amount, expected):
     """Test categorize_transaction function."""
+    if amount == -99.99:
+        print (DEFAULT_CATEGORIZER._category_lookup)
     assert DEFAULT_CATEGORIZER.get_category(description, amount) == expected
 
 

@@ -94,6 +94,9 @@ def normalize_csv(input_path: Path, transactions_df: pd.DataFrame = None) -> pd.
     if df is None:
         df = pd.read_csv(input_path)
 
+    if df.empty:
+        return df
+
     # Determine the source PDF filename
     if "File" not in df.columns:
         df["File"] = input_path.with_suffix(".pdf").name
