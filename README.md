@@ -1,6 +1,6 @@
-# rbc-pdf-to-csv
+# bank-statement
 
-A Python CLI tool to convert bank statement PDFs to CSV files with automatic normalization.
+A Python CLI tool to convert bank statement PDFs to CSV files with automatic normalization. This is primarily been tested with RBC statements
 
 ## Features
 
