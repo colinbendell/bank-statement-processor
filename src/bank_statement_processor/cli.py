@@ -7,9 +7,8 @@ import click
 import pandas as pd
 
 from . import __version__
-from .account_metadata import extract_statement_metadata
 from .classifier import Classifier
-from .extractors import extract_to_csv
+from .extractors import extract_to_csv, extract_filename
 from .processors import normalize_csv
 
 
@@ -127,7 +126,7 @@ def accounts(path: Path):
     if path.is_file():
         pdf_files = [path]
     else:
-        pdf_files = sorted(path.rglob("*.pdf"))
+        pdf_files = sorted(path.rglob("**/*.pdf"))
 
     if not pdf_files:
         click.echo(f"No PDF files found in {path}", err=True)
@@ -135,13 +134,11 @@ def accounts(path: Path):
 
     click.echo(f"Processing {len(pdf_files)} PDF files...")
 
-    # Extract account information
-    results = extract_statement_metadata(pdf_files)
-
-    for result in results:
-        filestem = Path(result["file"]).stem
-        click.echo(f"🔍 {filestem} - {result['account_type']}/{result['account_class']}/{result['account_number']}")
-
+    for pdf_file in pdf_files:
+        filename = extract_filename(pdf_file)
+        if not filename:
+            continue
+        click.echo(f"mv '{pdf_file}' 'inputs/personal/{filename}.pdf'")
 
 @cli.command(name="main")
 @click.pass_context
