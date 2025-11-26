@@ -132,7 +132,7 @@ class StatementExtractor:
     CREDIT_CARD_REGEX = re.compile(r"credit card|cardholder agreement", re.IGNORECASE)
     SAVINGS_REGEX = re.compile(r"savings?\s*account|esavings", re.IGNORECASE)
     CHEQUING_REGEX = re.compile(r"(?:chequing|banking)\s*account", re.IGNORECASE)
-    DEBITS_REGEX = re.compile(r"chequs|debits", re.IGNORECASE)
+    DEBITS_REGEX = re.compile(r"cheques|debits|deposits", re.IGNORECASE)
 
     @staticmethod
     def extract_account_type(all_text: list[str]) -> str:
@@ -146,7 +146,7 @@ class StatementExtractor:
         """
         # Account type is always on first page, check first 800 chars to include table headers
         for page in all_text[:2]:
-            page_text = page[:400]
+            page_text = page[:500]
 
             if match := StatementExtractor.VISA_MC_REGEX.search(page_text):
                 return match.group(0).lower()
@@ -747,8 +747,43 @@ def extract_to_csv(pdf_path: Path) -> pd.DataFrame:
             return df
 
         filename = f"{account_use}_{account_type}_{account_number}_{end_date.strftime('%Y_%m_%d')}"
-        filename = re.sub(r"[\s.-]", "", filename).replace("*", "X")
+        filename = re.sub(r"[\s.-]", "", filename).replace("*", "x")
 
         df["File"] = filename
 
     return df
+
+def extract_filename(pdf_path: Path) -> pd.DataFrame:
+    """
+    Extract transactions from a PDF and return CSV content as a string.
+
+    Args:
+        pdf_path: Path to the PDF file
+
+    Returns:
+        CSV content as a string
+    """
+    with pymupdf.open(pdf_path) as pdf:
+        all_text = []
+        for page in pdf:
+            all_text.append(page.get_text())
+
+        account_use = StatementExtractor.extract_account_use(all_text)
+        account_type = StatementExtractor.extract_account_type(all_text)
+        account_numbers = list(StatementExtractor.extract_account_numbers(all_text))
+        # TODO: make this based on frequency
+        account_number = account_numbers[-1]
+
+        # file = "personal/rbc/visa/141232/2025-08-20.pdf"
+
+        if account_type in ["visa", "master card", "credit card"]:
+            extractor = VisaStatementExtractor()
+        else:
+            extractor = ChequingSavingsStatementExtractor()
+        _start_date, end_date = extractor.statement_period(all_text)
+
+        if not end_date:
+            return None
+        filename = f"{account_use}_{account_type}_{account_number}_{end_date.strftime('%Y_%m_%d')}"
+        filename = re.sub(r"[\s.-]", "", filename).replace("*", "x")
+        return filename
