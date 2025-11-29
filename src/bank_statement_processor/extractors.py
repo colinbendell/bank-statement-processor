@@ -5,7 +5,7 @@ Uses text span coordinates to properly reconstruct table rows from PDF layout.
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -238,6 +238,10 @@ class VisaStatementExtractor(StatementExtractor):
         Handles both single-card and multi-card statements. Multi-card statements have
         sections for each card number (e.g., "4516 07** **** 4390").
         """
+
+        # Posted date can be up to 30 days after the transaction date, we move the start_date back so the year calculations work
+        start_date = start_date - timedelta(days=30)
+
         # Use dict of lists for faster DataFrame construction
         transactions = {
             "Transaction Date": [],
