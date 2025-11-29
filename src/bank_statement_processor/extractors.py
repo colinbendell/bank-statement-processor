@@ -675,10 +675,11 @@ class ChequingSavingsStatementExtractor(StatementExtractor):
 
                         # Determine which column based on X position using ranges
                         # Amounts are right-aligned, so we need adjusted boundaries
-                        # Based on empirical observation, boundaries are:
-                        # Withdrawals: < 400, Deposits: 400-500, Balance: > 500
-                        withdrawal_deposit_boundary = 400.0
-                        deposit_balance_boundary = 500.0
+                        # Based on empirical observation from sample statements:
+                        # Withdrawals: ~310-351, Deposits: ~397-430, Balance: ~525-558
+                        # Use midpoints between ranges as boundaries
+                        withdrawal_deposit_boundary = 375.0  # Midpoint between 351 and 397
+                        deposit_balance_boundary = 480.0  # Midpoint between 430 and 525
 
                         if x < withdrawal_deposit_boundary:
                             withdrawal_amount = amount
